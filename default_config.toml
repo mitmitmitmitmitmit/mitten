@@ -1,0 +1,97 @@
+[general]
+# Recording mode: "desktop", "window", "game"
+mode = "desktop"
+
+# Replay buffer length in seconds (15-120)
+buffer_seconds = 30
+
+# Capture framerate
+framerate = 30
+
+# Directory to save clips
+save_dir = "~/Videos/mitten"
+
+# Monitor to capture — "auto" detects the primary Wayland output,
+# or set to a specific output name like "DP-1", "HDMI-A-1", "screen" (all monitors)
+monitor = "auto"
+
+[recorder]
+# Output container format
+container = "mp4"
+
+# Quality preset: "very_high", "high", "medium", "low"
+quality = "very_high"
+
+# Codec for the replay buffer (internal): hevc = smaller RAM usage
+capture_codec = "hevc"
+
+# Codec for saved clips: h264 = Discord/browser compatible, hevc = smaller files
+output_codec = "h264"
+
+# Watermark re-encode quality (NVENC CQ): lower = better quality + larger file
+# 20 = high quality, 26 = balanced, 32 = aggressive compression
+watermark_cq = 26
+
+# Audio device to capture — empty string = no audio
+# Run: gpu-screen-recorder --list-audio-devices  to see available devices
+# Use the ".monitor" suffix on an output device to capture desktop audio
+audio_device = ""
+
+[trigger]
+# Input button to trigger a clip save.
+# Common values: BTN_EXTRA (276), BTN_SIDE (275), BTN_MIDDLE (274), BTN_BACK (278)
+button = "BTN_EXTRA"
+
+# Seconds between allowed triggers (prevents accidental double-saves)
+cooldown = 3.0
+
+[watermark]
+# Burn a watermark into saved clips
+enabled = true
+
+# Main watermark text
+text = "~( ^.x.^)> caught by mitten"
+
+# Subtext shown below the main text
+subtext = "programmed by mit"
+
+# Font size in pixels
+fontsize = 20
+
+# Font color with opacity (ffmpeg format: color@opacity)
+fontcolor = "white@0.6"
+
+# Corner: "bottom_right", "bottom_left", "top_right", "top_left"
+position = "bottom_right"
+
+# Padding from the corner in pixels
+padding = 20
+
+[game_detection]
+# Enable automatic game detection (only matters in "game" mode)
+enabled = true
+
+# How often to scan for running games in seconds
+poll_interval = 5
+
+# Automatically switch to window capture when a game is detected
+auto_switch = true
+
+# Additional process binary names to detect as games
+custom_processes = []
+
+# Window title substrings to detect as games (unused — process detection preferred)
+custom_window_titles = []
+
+[notifications]
+# Enable desktop notifications via notify-send
+enabled = true
+
+# Notify when recording starts
+on_start = true
+
+# Notify when a clip is saved
+on_save = true
+
+# Notify on errors
+on_error = true

@@ -1,0 +1,19 @@
+[Unit]
+Description=Mitten - Background Screen Recording
+Documentation=https://github.com/mitmitmitmitmitmit/mitten
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/mitten run
+Restart=on-failure
+RestartSec=3
+
+# Keep stdout/stderr in the journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mitten
+
+[Install]
+WantedBy=graphical-session.target

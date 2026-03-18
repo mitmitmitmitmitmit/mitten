@@ -1,0 +1,165 @@
+"""
+evdev mouse button listener.
+Runs in a daemon thread, fires a callback when the configured button is pressed.
+"""
+from __future__ import annotations
+
+import logging
+import select
+import threading
+import time
+from typing import Callable
+
+from .config import MittenConfig, button_name_to_code
+
+log = logging.getLogger(__name__)
+
+# Module-level import so the absence of evdev is detected once at startup,
+# not silently swallowed on every call.
+try:
+    from evdev import InputDevice, ecodes, list_devices
+    _HAS_EVDEV = True
+except ImportError:
+    _HAS_EVDEV = False
+
+
+class TriggerListener:
+    """
+    Opens all mouse-capable evdev devices and listens for the configured
+    button press. Calls `on_trigger()` when detected, subject to cooldown.
+    """
+
+    def __init__(
+        self,
+        config: MittenConfig,
+        on_trigger: Callable[[], None],
+        on_error: Callable[[str], None] | None = None,
+    ) -> None:
+        self._button_code: int = button_name_to_code(config.trigger.button)
+        self._cooldown: float = config.trigger.cooldown
+        self._on_trigger = on_trigger
+        self._on_error = on_error
+        self._thread: threading.Thread | None = None
+        self._shutdown = threading.Event()
+        self._last_trigger: float = 0.0
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
+
+    def start(self) -> bool:
+        """
+        Start the listener thread.
+        Returns True if at least one mouse device was found, False otherwise.
+        """
+        if not _HAS_EVDEV:
+            msg = "python-evdev not installed. Run: pip install evdev"
+            log.error(msg)
+            if self._on_error:
+                self._on_error(msg)
+            return False
+
+        devices = self._open_devices()
+        if not devices:
+            log.warning(
+                "No mouse evdev devices found. "
+                "Is the user in the 'input' group? "
+                "Falling back to SIGUSR1 / tray icon save."
+            )
+            return False
+
+        self._shutdown.clear()
+        self._thread = threading.Thread(
+            target=self._listen_loop,
+            args=(devices,),
+            name="trigger-listener",
+            daemon=True,
+        )
+        self._thread.start()
+        log.info(
+            "Trigger listener started on %d device(s), button code=%d",
+            len(devices),
+            self._button_code,
+        )
+        return True
+
+    def stop(self) -> None:
+        self._shutdown.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=2)
+
+    # ------------------------------------------------------------------ #
+    # Internal
+    # ------------------------------------------------------------------ #
+
+    def _open_devices(self) -> list:
+        devices = []
+        for fn in list_devices():
+            try:
+                dev = InputDevice(fn)
+                caps = dev.capabilities()
+                if ecodes.EV_KEY in caps:
+                    devices.append(dev)
+                    log.debug("Monitoring input device: %s (%s)", fn, dev.name)
+            except (PermissionError, OSError) as e:
+                log.debug("Cannot open %s: %s", fn, e)
+        return devices
+
+    def _listen_loop(self, devices: list) -> None:
+        fd_map = {d.fd: d for d in devices}
+
+        try:
+            while not self._shutdown.is_set():
+                try:
+                    r, _, _ = select.select(fd_map.keys(), [], [], 1.0)
+                except (ValueError, OSError):
+                    fd_map = {fd: d for fd, d in fd_map.items() if _fd_ok(fd)}
+                    if not fd_map:
+                        msg = "All input devices closed — trigger disabled"
+                        log.error(msg)
+                        if self._on_error:
+                            self._on_error(msg)
+                        return
+                    continue
+
+                for fd in r:
+                    dev = fd_map.get(fd)
+                    if dev is None:
+                        continue
+                    try:
+                        for event in dev.read():
+                            if (
+                                event.type == ecodes.EV_KEY
+                                and event.code == self._button_code
+                                and event.value == 1  # key-down
+                            ):
+                                self._fire()
+                    except OSError as e:
+                        log.warning("Device read error: %s", e)
+                        fd_map.pop(fd, None)
+        finally:
+            for d in devices:
+                try:
+                    d.close()
+                except Exception:
+                    pass
+
+    def _fire(self) -> None:
+        now = time.monotonic()
+        if now - self._last_trigger < self._cooldown:
+            log.debug("Trigger ignored (cooldown)")
+            return
+        self._last_trigger = now
+        log.info("Trigger fired!")
+        try:
+            self._on_trigger()
+        except Exception as e:
+            log.error("on_trigger callback raised: %s", e)
+
+
+def _fd_ok(fd: int) -> bool:
+    try:
+        select.select([fd], [], [], 0)
+        return True
+    except (ValueError, OSError):
+        return False

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=MITTEN
+Comment=Replay buffer screen recorder
+Exec=mitten
+Icon=mitten
+Type=Application
+Categories=AudioVideo;Recorder;
+Keywords=screen;record;clip;replay;
+StartupWMClass=MITTEN
