@@ -479,6 +479,54 @@ class MittenDaemon:
                     urgency="low", icon="media-playback-pause", timeout_ms=3000,
                 )
 
+    def _reload_config(self) -> None:
+        """Reload config from disk and apply mode/recorder changes."""
+        try:
+            from .config import load_config
+            new_cfg = load_config()
+        except Exception as e:
+            log.error("Config reload failed: %s", e)
+            return
+
+        old_mode = self._config.general.mode
+        new_mode = new_cfg.general.mode
+        self._config = new_cfg
+
+        if old_mode == "game" and new_mode != "game":
+            # game → desktop/window: stop detector, start recorder
+            if self._detector:
+                self._detector.stop()
+                self._detector = None
+            if not self._recorder.is_running():
+                try:
+                    self._recorder.start()
+                    self._presence.set_state("recording")
+                    log.info("Config reload: %s mode active, recorder started", new_mode)
+                except RuntimeError as e:
+                    log.error("Recorder start after reload failed: %s", e)
+
+        elif old_mode != "game" and new_mode == "game":
+            # desktop/window → game: stop recorder, start detector
+            self._recorder.stop()
+            self._presence.set_state("idle")
+            if new_cfg.game_detection.enabled and not self._detector:
+                from .detect import GameDetector
+                self._detector = GameDetector(
+                    new_cfg,
+                    on_game_start=self._on_game_start,
+                    on_game_stop=self._on_game_stop,
+                )
+                self._detector.start()
+                log.info("Config reload: game mode active, detector started")
+
+        else:
+            # Same mode — restart recorder to pick up new settings
+            if self._recorder.is_running():
+                self._recorder.restart()
+                log.info("Config reload: settings updated, recorder restarted")
+
+        log.info("Config reloaded (mode: %s → %s)", old_mode, new_mode)
+
     def _setup_signal_handlers(self) -> None:
         def _handle_shutdown(signum, frame):
             log.info("Received signal %d, shutting down...", signum)
@@ -492,7 +540,12 @@ class MittenDaemon:
             log.info("Received SIGUSR2 — toggling pause")
             threading.Thread(target=self._toggle_pause, daemon=True).start()
 
+        def _handle_reload(signum, frame):
+            log.info("Received SIGHUP — reloading config")
+            threading.Thread(target=self._reload_config, daemon=True).start()
+
         signal.signal(signal.SIGINT, _handle_shutdown)
         signal.signal(signal.SIGTERM, _handle_shutdown)
         signal.signal(signal.SIGUSR1, _handle_save)
         signal.signal(signal.SIGUSR2, _handle_pause)
+        signal.signal(signal.SIGHUP, _handle_reload)

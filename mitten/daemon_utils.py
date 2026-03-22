@@ -109,3 +109,15 @@ def send_save_signal(pid: int) -> bool:
         return True
     except ProcessLookupError:
         return False
+
+
+def send_reload_signal(pid: int) -> bool:
+    """
+    Send SIGHUP to the daemon to reload config from disk and apply changes.
+    Returns True on success, False if the process no longer exists.
+    """
+    try:
+        os.kill(pid, signal.SIGHUP)
+        return True
+    except ProcessLookupError:
+        return False

@@ -912,6 +912,7 @@ class SettingsDialog(QWidget):
 
         self._mode_combo = QComboBox()
         self._mode_combo.addItems(["desktop", "window", "game"])
+        self._mode_combo.currentTextChanged.connect(self._on_mode_changed)
         form.addRow("Mode", self._mode_combo)
 
         buf_row = QHBoxLayout()
@@ -1620,6 +1621,7 @@ class SettingsDialog(QWidget):
                 return
 
         g = cfg.general
+        self._confirmed_mode = g.mode
         self._mode_combo.setCurrentText(g.mode)
         self._buffer_slider.setValue(g.buffer_seconds)
         self._buffer_spin.setValue(g.buffer_seconds)
@@ -1782,6 +1784,50 @@ class SettingsDialog(QWidget):
                 pass
         QApplication.instance().quit()
 
+    def _on_mode_changed(self, new_mode: str) -> None:
+        """Warn the user if they switch modes while the daemon is recording."""
+        try:
+            from ..daemon_utils import get_daemon_pid
+            pid = get_daemon_pid()
+            if not pid:
+                return
+            prev = getattr(self, "_confirmed_mode", self._mode_combo.currentText())
+            if new_mode == prev:
+                return
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle("switch modes?")
+            lay = QVBoxLayout(dlg)
+            lay.setContentsMargins(20, 20, 20, 20)
+            lay.setSpacing(12)
+            lbl = QLabel(
+                f"switching to <b>{new_mode}</b> mode requires the recorder to restart.<br>"
+                "the current buffer will be lost."
+            )
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet(f"color: {C.TEXT}; font-size: 13px;")
+            lay.addWidget(lbl)
+            btn_row = QHBoxLayout()
+            btn_row.addStretch()
+            btn_no = QPushButton("no, keep current")
+            btn_yes = QPushButton("yes, switch")
+            btn_yes.setProperty("class", "danger")
+            btn_no.clicked.connect(dlg.reject)
+            btn_yes.clicked.connect(dlg.accept)
+            btn_row.addWidget(btn_no)
+            btn_row.addWidget(btn_yes)
+            lay.addLayout(btn_row)
+
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                # Revert
+                self._mode_combo.blockSignals(True)
+                self._mode_combo.setCurrentText(prev)
+                self._mode_combo.blockSignals(False)
+            else:
+                self._confirmed_mode = new_mode
+        except Exception:
+            pass
+
     def _on_save(self) -> None:
         try:
             self._do_save()
@@ -1922,6 +1968,16 @@ class SettingsDialog(QWidget):
                 self._restart_gui()
                 return
 
+        # Signal daemon to reload config (non-fatal if not running)
+        try:
+            from ..daemon_utils import get_daemon_pid, send_reload_signal
+            pid = get_daemon_pid()
+            if pid:
+                send_reload_signal(pid)
+        except Exception:
+            pass
+
+        self._confirmed_mode = cfg.general.mode
         self._save_status.setText("✓  saved")
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(3000, lambda: self._save_status.setText(""))
