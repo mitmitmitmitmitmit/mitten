@@ -32,13 +32,13 @@ _CLIENT_ID = "1484018158300823643"
 # Presence states — map daemon state strings to (state, details) tuples.
 # "state" is the small lower line; "details" is the upper/main line.
 _PRESENCE_STATES: dict[str, tuple[str, str]] = {
-    "idle":          ("idle",             "waiting for something good"),
-    "recording":     ("recording",        "mitten is watching\u2026"),
-    "game":          ("game mode",        "recording gameplay"),
-    "saving":        ("saving clip",      "caught one!"),
-    "paused":        ("paused",           "buffer paused"),
-    "session":       ("session recording","recording full session"),
-    "recorder_dead": ("recorder crashed", "something went wrong"),
+    "idle":          ("idle",              "~( ^.x.^)>  waiting for something good"),
+    "recording":     ("recording",         "~( ^.x.^)>  mitten is watching\u2026"),
+    "game":          ("game mode",         "(=ʘωʘ=)✨  recording gameplay"),
+    "saving":        ("saving clip",       "~( ^.x.^)> \u266a  caught one!"),
+    "paused":        ("paused",            "~( ^.-.-)>  buffer paused"),
+    "session":       ("session recording", "~( ^.x.^)>  recording full session"),
+    "recorder_dead": ("recorder crashed",  "~( x.x.^)>  something went wrong"),
 }
 
 
@@ -105,15 +105,17 @@ class DiscordPresence:
                     pass
                 self._sock = None
 
-    def set_state(self, state: str, detail_override: str | None = None) -> None:
+    def set_state(self, state: str, detail_override: str | None = None, name_override: str | None = None) -> None:
         """Update Discord presence to reflect the given daemon state.
-        detail_override replaces the default details line (e.g. game name)."""
+        detail_override replaces the default details line.
+        name_override sets the activity name shown in the compact friends list."""
         with self._lock:
             self._pending_state = state
             self._detail_override = detail_override
+            self._name_override = name_override
             if self._connected:
                 try:
-                    self._send_presence(state, detail_override)
+                    self._send_presence(state, detail_override, name_override)
                 except OSError:
                     self._connected = False
                     self._sock = None
@@ -140,10 +142,11 @@ class DiscordPresence:
                 with self._lock:
                     pending = self._pending_state
                     override = getattr(self, "_detail_override", None)
+                    name_ov = getattr(self, "_name_override", None)
                 if pending:
                     try:
                         with self._lock:
-                            self._send_presence(pending, override)
+                            self._send_presence(pending, override, name_ov)
                     except OSError:
                         with self._lock:
                             self._connected = False
@@ -179,27 +182,24 @@ class DiscordPresence:
             with self._lock:
                 self._sock = None
 
-    def _send_presence(self, state: str, detail_override: str | None = None) -> None:
+    def _send_presence(self, state: str, detail_override: str | None = None, name_override: str | None = None) -> None:
         """Build and send a SET_ACTIVITY frame. Must be called with lock held."""
         entry = _PRESENCE_STATES.get(state, _PRESENCE_STATES["idle"])
         activity_state, activity_details = entry
         if detail_override:
             activity_details = detail_override
 
+        activity: dict = {
+            "state":      activity_state,
+            "details":    activity_details,
+            "timestamps": {"start": self._start_ts},
+        }
+        if name_override:
+            activity["name"] = name_override
+
         payload = {
             "cmd": "SET_ACTIVITY",
-            "args": {
-                "pid": os.getpid(),
-                "activity": {
-                    "state":   activity_state,
-                    "details": activity_details,
-                    "timestamps": {"start": self._start_ts},
-                    # TODO: add large_image/small_image once assets are in the dev portal
-                    # "assets": {"large_image": "mitten_logo", "large_text": "mitten"},
-                    # TODO: add buttons when the website is live
-                    # "buttons": [{"label": "get mitten", "url": "https://mitten.clips"}],
-                },
-            },
+            "args": {"pid": os.getpid(), "activity": activity},
             "nonce": str(uuid.uuid4()),
         }
         self._send_frame(payload)

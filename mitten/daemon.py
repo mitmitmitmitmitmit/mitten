@@ -114,10 +114,6 @@ class MittenDaemon:
                 on_game_stop=self._on_game_stop,
             )
 
-    # ------------------------------------------------------------------ #
-    # Lifecycle
-    # ------------------------------------------------------------------ #
-
     def run(self) -> None:
         self._setup_signal_handlers()
         self._ensure_dirs()
@@ -131,24 +127,20 @@ class MittenDaemon:
             self._config.general.monitor,
         )
 
-        # Start Discord presence (non-fatal if Discord isn't running)
         self._presence.start()
         self._presence.set_state("idle")
 
-        # Start clip watcher first so it's ready before any clips land
         self._watcher.start()
 
-        # Start recording (skip in game mode — detector will start it)
         if self._config.general.mode != "game":
             try:
                 self._recorder.start()
-                self._presence.set_state("recording")
+                self._presence.set_state("recording", name_override=self._recording_name())
             except RuntimeError as e:
                 log.error("%s", e)
                 print(f"\nError: {e}\n")
                 sys.exit(1)
 
-        # Start trigger listener
         has_input = self._trigger.start()
         if not has_input and self._config.notifications.enabled:
             notify.notify(
@@ -157,7 +149,6 @@ class MittenDaemon:
                 urgency="normal", icon="input-mouse", timeout_ms=5000,
             )
 
-        # Start game detector
         if self._detector:
             self._detector.start()
             log.info("Game mode: waiting for a game to be detected...")
@@ -186,16 +177,12 @@ class MittenDaemon:
         """Programmatically trigger a save (called by SIGUSR1 handler)."""
         self._on_trigger()
 
-    # ------------------------------------------------------------------ #
-    # Callbacks
-    # ------------------------------------------------------------------ #
-
     def _on_triple_trigger(self) -> None:
         """Toggle full session recording on/off."""
         if self._session_recorder.is_recording():
             # Stop — save the file through the normal post-process pipeline
             log.info("Session recording stopped by triple-click")
-            self._presence.set_state("recording" if self._recorder.is_running() else "idle")
+            self._presence.set_state("recording" if self._recorder.is_running() else "idle", name_override=self._recording_name() if self._recorder.is_running() else None)
             sounds.session_stop()
             path = self._session_recorder.stop()
             if path:
@@ -213,7 +200,6 @@ class MittenDaemon:
             else:
                 notify.notify("~( x.x.^)>  session error", "recording was empty or lost")
         else:
-            # Start
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             out_path = TMP_DIR / f"session_{timestamp}.mp4"
@@ -315,8 +301,7 @@ class MittenDaemon:
                     urgency="normal", icon="dialog-error", timeout_ms=5000,
                 )
 
-        # Presence back to recording once clip is handed off to post-process
-        self._presence.set_state("recording" if self._recorder.is_running() else "idle")
+        self._presence.set_state("recording" if self._recorder.is_running() else "idle", name_override=self._recording_name() if self._recorder.is_running() else None)
 
         save.process_clip(
             raw_path=raw_path,
@@ -340,8 +325,13 @@ class MittenDaemon:
                 urgency="critical", icon="dialog-error", timeout_ms=8000,
             )
 
+    def _recording_name(self) -> str:
+        if self._config.general.mode == "window":
+            return "clipping window with mitten"
+        return "clipping desktop with mitten"
+
     def _on_game_start(self, game: GameInfo) -> None:
-        self._presence.set_state("game", detail_override=game.name)
+        self._presence.set_state("game", detail_override=game.name, name_override=f"{game.name} with mitten")
         log.info("Game started: %s", game.name)
         if self._config.notifications.enabled:
             notify.notify(
@@ -379,10 +369,6 @@ class MittenDaemon:
             )
         self._recorder.stop()
         log.info("Game mode: capture paused. Waiting for next game...")
-
-    # ------------------------------------------------------------------ #
-    # Helpers
-    # ------------------------------------------------------------------ #
 
     def _ensure_dirs(self) -> None:
         TMP_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -448,12 +434,11 @@ class MittenDaemon:
     def _toggle_pause(self) -> None:
         """SIGUSR2: pause recording if active, resume if paused."""
         if PAUSE_FILE.exists():
-            # Resume
             log.info("Resuming recording (SIGUSR2)")
             PAUSE_FILE.unlink(missing_ok=True)
             try:
                 self._recorder.start()
-                self._presence.set_state("recording")
+                self._presence.set_state("recording", name_override=self._recording_name())
             except RuntimeError as e:
                 log.error("Failed to resume recorder: %s", e)
                 return
@@ -464,7 +449,6 @@ class MittenDaemon:
                     urgency="low", icon="media-record", timeout_ms=3000,
                 )
         else:
-            # Pause
             log.info("Pausing recording (SIGUSR2)")
             self._presence.set_state("paused")
             self._recorder.stop()
@@ -493,20 +477,18 @@ class MittenDaemon:
         self._config = new_cfg
 
         if old_mode == "game" and new_mode != "game":
-            # game → desktop/window: stop detector, start recorder
             if self._detector:
                 self._detector.stop()
                 self._detector = None
             if not self._recorder.is_running():
                 try:
                     self._recorder.start()
-                    self._presence.set_state("recording")
+                    self._presence.set_state("recording", name_override=self._recording_name())
                     log.info("Config reload: %s mode active, recorder started", new_mode)
                 except RuntimeError as e:
                     log.error("Recorder start after reload failed: %s", e)
 
         elif old_mode != "game" and new_mode == "game":
-            # desktop/window → game: stop recorder, start detector
             self._recorder.stop()
             self._presence.set_state("idle")
             if new_cfg.game_detection.enabled and not self._detector:
@@ -520,7 +502,6 @@ class MittenDaemon:
                 log.info("Config reload: game mode active, detector started")
 
         else:
-            # Same mode — restart recorder to pick up new settings
             if self._recorder.is_running():
                 self._recorder.restart()
                 log.info("Config reload: settings updated, recorder restarted")
