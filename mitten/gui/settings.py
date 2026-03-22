@@ -37,10 +37,6 @@ from PyQt6.QtWidgets import (
 from .resources import C, _accent_hover, _hex_rgba
 
 
-# ------------------------------------------------------------------ #
-# Section separator label
-# ------------------------------------------------------------------ #
-
 def _sep(text: str) -> QLabel:
     _suffixes = [" · smh", " · yikes", " · tragic", " · oof", " · really"]
     try:
@@ -58,10 +54,6 @@ def _sep(text: str) -> QLabel:
     )
     return lbl
 
-
-# ------------------------------------------------------------------ #
-# CQ slider with graph dots + live quality label
-# ------------------------------------------------------------------ #
 
 _CQ_LABELS = [
     (16, 19, "insane quality", "file size absolutely DEMOLISHED"),
@@ -118,10 +110,6 @@ class _CQSlider(QSlider):
 
         painter.end()
 
-
-# ------------------------------------------------------------------ #
-# Specs advisor (collapsible — General tab)
-# ------------------------------------------------------------------ #
 
 class _SpecsAdvisor(QWidget):
     """Collapsible 'your specs' panel: detected hardware → recommended settings."""
@@ -225,7 +213,6 @@ class _SpecsAdvisor(QWidget):
             rl.addStretch()
             self._bl.addWidget(row_w)
 
-        # Bottom insult label in light mode (~60% chance)
         if _light_active and random.random() < 0.60:
             try:
                 from .themes import get_abuse
@@ -245,7 +232,6 @@ class _SpecsAdvisor(QWidget):
         import subprocess as _sp
         import sys
 
-        # ── NVIDIA ────────────────────────────────────────────────────
         try:
             r = _sp.run(
                 ["nvidia-smi", "--query-gpu=name,memory.total",
@@ -259,7 +245,6 @@ class _SpecsAdvisor(QWidget):
         except Exception:
             pass
 
-        # ── AMD via sysfs (Linux, no ROCm required) ───────────────────
         if sys.platform == "linux":
             try:
                 for card in sorted(Path("/sys/class/drm").glob("card[0-9]")):
@@ -269,7 +254,6 @@ class _SpecsAdvisor(QWidget):
                     vram_mb = int(vram_path.read_text().strip()) // (1024 * 1024)
                     if vram_mb < 512:
                         continue  # skip integrated / invalid
-                    # Try to get friendly name via lspci
                     vendor_f = card / "device" / "vendor"
                     device_f = card / "device" / "device"
                     if vendor_f.exists() and device_f.exists():
@@ -293,7 +277,6 @@ class _SpecsAdvisor(QWidget):
             except Exception:
                 pass
 
-        # ── Intel Arc / fallback via lspci ────────────────────────────
         if sys.platform == "linux":
             try:
                 r = _sp.run(["lspci"], capture_output=True, text=True, timeout=5)
@@ -302,11 +285,6 @@ class _SpecsAdvisor(QWidget):
                         return line.split(":", 2)[-1].strip()[:40], 0
             except Exception:
                 pass
-
-        # ── Windows stub (wmic / dxdiag — implement at 1.0) ──────────
-        # if sys.platform == "win32":
-        #     from .platform_win32 import get_gpu_info
-        #     return get_gpu_info()
 
         return "", 0
 
@@ -327,7 +305,6 @@ class _SpecsAdvisor(QWidget):
             return "medium", True
         if "arc" in n:
             return ("high", True) if any(x in n for x in ("a770", "a750")) else ("medium", True)
-        # VRAM tiebreaker for unknown GPU
         if vram_mb >= 8000:
             return "very_high", True
         if vram_mb >= 6000:
@@ -359,7 +336,6 @@ class _SpecsAdvisor(QWidget):
                 buf_note = "buffer: keep under 30s"
             rows.append(("vram", f"{vram_mb / 1024:.0f}GB", buf_note, vram_mb >= 4000))
 
-        # CPU — Linux /proc/cpuinfo; Windows: platform.processor()
         try:
             if sys.platform == "linux":
                 for line in Path("/proc/cpuinfo").read_text().splitlines():
@@ -379,7 +355,6 @@ class _SpecsAdvisor(QWidget):
         except Exception:
             pass
 
-        # RAM — Linux /proc/meminfo; Windows: psutil or ctypes
         try:
             if sys.platform == "linux":
                 for line in Path("/proc/meminfo").read_text().splitlines():
@@ -403,7 +378,6 @@ class _SpecsAdvisor(QWidget):
         except Exception:
             pass
 
-        # Display server
         if os.environ.get("WAYLAND_DISPLAY"):
             rows.append(("display", "Wayland", "desktop or game mode", True))
         elif os.environ.get("DISPLAY"):
@@ -415,16 +389,9 @@ class _SpecsAdvisor(QWidget):
 
 
 # ------------------------------------------------------------------ #
-# Abuse animation helper
-# ------------------------------------------------------------------ #
-
-
-
-# ------------------------------------------------------------------ #
 # Anti-disable gauntlet — 5-stage abuse toggle dialogs
 # ------------------------------------------------------------------ #
 
-# Module-level stage tracker — resets when the flow is abandoned
 _gauntlet_stage: int = 0
 
 
@@ -732,7 +699,6 @@ def _stage5_reveal(parent: QWidget) -> None:
     import shutil
     import dataclasses
 
-    # Save "Default" theme to config so it persists, then apply immediately
     try:
         from ..config import load_config
         from .config_io import save_config
@@ -743,7 +709,6 @@ def _stage5_reveal(parent: QWidget) -> None:
     except Exception:
         pass
 
-    # Apply the theme live so the GUI visually switches before restarting
     try:
         from .themes import apply_theme
         from .resources import make_stylesheet
@@ -755,7 +720,6 @@ def _stage5_reveal(parent: QWidget) -> None:
     except Exception:
         pass
 
-    # Restart the GUI — unlink socket, spawn new process with reveal flag
     try:
         from ..config import GUI_SOCKET
         GUI_SOCKET.unlink(missing_ok=True)
@@ -771,16 +735,11 @@ def _stage5_reveal(parent: QWidget) -> None:
             stderr=_sp.DEVNULL,
         )
 
-    # Quit current GUI
     from PyQt6.QtWidgets import QApplication
     app = QApplication.instance()
     if app:
         QTimer.singleShot(200, app.quit)
 
-
-# ------------------------------------------------------------------ #
-# Settings widget
-# ------------------------------------------------------------------ #
 
 class SettingsDialog(QWidget):
     """MITTEN settings — headless QStackedWidget, nav controlled by main window."""
@@ -793,7 +752,6 @@ class SettingsDialog(QWidget):
         self.setStyleSheet(f"background-color: {C.BG};")
         self._build_ui()
         self._load_config()
-        # Light mode: set abuse tooltips on 2-3 random setting fields
         try:
             from .themes import LIGHT_MODE_ACTIVE, get_abuse
             if LIGHT_MODE_ACTIVE:
@@ -821,7 +779,6 @@ class SettingsDialog(QWidget):
         self._pages.addWidget(self._make_games_tab())         # 4
         root.addWidget(self._pages, 1)
 
-        # Save bar pinned at bottom
         save_bar = QWidget()
         save_bar.setStyleSheet(
             f"background-color: {_hex_rgba(C.BG, 0.9)};"
@@ -862,10 +819,6 @@ class SettingsDialog(QWidget):
 
         root.addWidget(save_bar)
 
-    # ------------------------------------------------------------------ #
-    # Public API
-    # ------------------------------------------------------------------ #
-
     def switch_section(self, idx: int) -> None:
         old_idx = self._pages.currentIndex()
         if old_idx == idx:
@@ -877,10 +830,6 @@ class SettingsDialog(QWidget):
         if page:
             from .anim import slide_fade_in
             slide_fade_in(page, direction=direction, duration_ms=180)
-
-    # ------------------------------------------------------------------ #
-    # Page builders
-    # ------------------------------------------------------------------ #
 
     def _page_wrapper(self) -> tuple[QWidget, QFormLayout]:
         """Scrollable page with centred max-width form."""
@@ -904,8 +853,6 @@ class SettingsDialog(QWidget):
 
         scroll.setWidget(wrapper)
         return scroll, form
-
-    # ── General (+ Trigger + Notifications) ──────────────────────────
 
     def _make_general_tab(self) -> QWidget:
         page, form = self._page_wrapper()
@@ -975,7 +922,6 @@ class SettingsDialog(QWidget):
         dir_row.addWidget(self._save_dir_browse)
         form.addRow("Save dir", dir_row)
 
-        # ── Appearance section ──
         form.addRow(_sep("APPEARANCE"))
 
         self._theme_combo = QComboBox()
@@ -1012,7 +958,6 @@ class SettingsDialog(QWidget):
         self._dev_mode_cb.toggled.connect(lambda checked: self.developer_mode_toggled.emit(checked))
         form.addRow("", self._dev_mode_cb)
 
-        # ── Abuse disable (light mode only — anti-disable gauntlet) ──
         self._disable_abuse_cb = QCheckBox("Disable verbal abuse")
         self._disable_abuse_cb.setVisible(False)
         self._disable_abuse_cb.clicked.connect(self._on_disable_abuse_clicked)
@@ -1024,7 +969,6 @@ class SettingsDialog(QWidget):
             pass
         form.addRow("", self._disable_abuse_cb)
 
-        # ── Trigger section ──
         form.addRow(_sep("TRIGGER"))
 
         btn_row = QHBoxLayout()
@@ -1049,7 +993,6 @@ class SettingsDialog(QWidget):
         self._cooldown_spin.setValue(3.0)
         form.addRow("Cooldown", self._cooldown_spin)
 
-        # ── Notifications section ──
         form.addRow(_sep("NOTIFICATIONS"))
 
         self._notif_enabled = QCheckBox("Enable desktop notifications")
@@ -1069,7 +1012,6 @@ class SettingsDialog(QWidget):
         self._notif_error.setChecked(True)
         form.addRow("", self._notif_error)
 
-        # ── Specs advisor ──
         form.addRow(_sep("YOUR SPECS"))
         self._specs_advisor = _SpecsAdvisor()
         form.addRow(self._specs_advisor)
@@ -1086,8 +1028,6 @@ class SettingsDialog(QWidget):
         form.addRow("", btn_apply_specs)
 
         return page
-
-    # ── Recording (+ Audio) ──────────────────────────────────────────
 
     def _make_recording_tab(self) -> QWidget:
         page, form = self._page_wrapper()
@@ -1126,13 +1066,11 @@ class SettingsDialog(QWidget):
         cap_col.addWidget(cap_hint)
         form.addRow("Capture codec", cap_col)
 
-        # ── Audio section ──
         form.addRow(_sep("AUDIO"))
 
         self._audio_combo = QComboBox()
         self._audio_combo.addItem("System default", "default")
         self._audio_combo.addItem("(no audio)", "")
-        # Auto-detect audio devices from gpu-screen-recorder
         try:
             import subprocess as _sp
             _r = _sp.run(
@@ -1178,8 +1116,6 @@ class SettingsDialog(QWidget):
         form.addRow("Mic input", self._mic_combo)
 
         return page
-
-    # ── Compression ──────────────────────────────────────────────────
 
     def _make_compression_tab(self) -> QWidget:
         page, form = self._page_wrapper()
@@ -1258,8 +1194,6 @@ class SettingsDialog(QWidget):
 
         return page
 
-    # ── Watermark ────────────────────────────────────────────────────
-
     def _make_watermark_tab(self) -> QWidget:
         page, form = self._page_wrapper()
 
@@ -1334,7 +1268,6 @@ class SettingsDialog(QWidget):
         self._wm_padding.setValue(20)
         form.addRow("Padding", self._wm_padding)
 
-        # ── Animation section ──
         anim_sep_row = QHBoxLayout()
         anim_sep_row.setSpacing(8)
         anim_sep_row.addWidget(_sep("ANIMATION"))
@@ -1351,13 +1284,11 @@ class SettingsDialog(QWidget):
         self._wm_anim_preset.setEnabled(False)
         form.addRow("Animation", self._wm_anim_preset)
 
-        # Paw icon intro
         self._wm_paw_intro = QCheckBox("Show animated paw intro")
         self._wm_paw_intro.setChecked(True)
         self._wm_paw_intro.setEnabled(False)
         form.addRow("", self._wm_paw_intro)
 
-        # Custom icon path
         icon_row = QHBoxLayout()
         self._wm_icon_path = QLineEdit()
         self._wm_icon_path.setPlaceholderText("(default paw icon)")
@@ -1382,8 +1313,6 @@ class SettingsDialog(QWidget):
 
         return page
 
-    # ── Games ────────────────────────────────────────────────────────
-
     def _make_games_tab(self) -> QWidget:
         page, form = self._page_wrapper()
 
@@ -1407,7 +1336,6 @@ class SettingsDialog(QWidget):
             pass
         form.addRow(_poll_lbl, self._gd_poll)
 
-        # ── Custom processes ──
         form.addRow(_sep("CUSTOM PROCESSES"))
 
         _hint1_text = "process names that trigger game mode"
@@ -1444,7 +1372,6 @@ class SettingsDialog(QWidget):
         proc_row.addWidget(self._proc_remove)
         form.addRow(proc_row)
 
-        # ── Custom window titles ──
         form.addRow(_sep("CUSTOM WINDOW TITLES"))
 
         _hint2_text = "window titles that trigger game mode (substring match)"
@@ -1489,13 +1416,8 @@ class SettingsDialog(QWidget):
 
         return page
 
-    # ------------------------------------------------------------------ #
-    # Toggles
-    # ------------------------------------------------------------------ #
-
     def _on_disable_abuse_clicked(self) -> None:
         """Anti-disable gauntlet — always keeps abuse on, just cycles through stages."""
-        # Always uncheck — the gauntlet will never actually disable abuse
         self._disable_abuse_cb.blockSignals(True)
         self._disable_abuse_cb.setChecked(False)
         self._disable_abuse_cb.blockSignals(False)
@@ -1556,10 +1478,6 @@ class SettingsDialog(QWidget):
                     break
             self._theme_combo.blockSignals(False)
 
-    # ------------------------------------------------------------------ #
-    # Interactions
-    # ------------------------------------------------------------------ #
-
     def _browse_save_dir(self) -> None:
         current = self._save_dir_edit.text().replace("~", str(Path.home()))
         path = QFileDialog.getExistingDirectory(self, "Choose save directory", current)
@@ -1607,10 +1525,6 @@ class SettingsDialog(QWidget):
             if result:
                 _code, name = result
                 self._trigger_btn_label.setText(name)
-
-    # ------------------------------------------------------------------ #
-    # Config I/O
-    # ------------------------------------------------------------------ #
 
     def _load_config(self, cfg=None) -> None:
         if cfg is None:
@@ -1698,7 +1612,6 @@ class SettingsDialog(QWidget):
         self._notif_error.setChecked(n.on_error)
         self._toggle_notify_fields(n.enabled)
 
-        # Light mode save button insult (~30% chance)
         try:
             from .themes import LIGHT_MODE_ACTIVE as _LMA
             if _LMA and random.random() < 0.30:
@@ -1727,7 +1640,6 @@ class SettingsDialog(QWidget):
                     applied.append(f"quality → {quality}")
 
             elif label == "vram" and note.startswith("buffer:"):
-                # Parse "up to Xs" or "keep under Xs"
                 import re
                 m = re.search(r"(\d+)s", note)
                 if m:
@@ -1819,7 +1731,6 @@ class SettingsDialog(QWidget):
             lay.addLayout(btn_row)
 
             if dlg.exec() != QDialog.DialogCode.Accepted:
-                # Revert
                 self._mode_combo.blockSignals(True)
                 self._mode_combo.setCurrentText(prev)
                 self._mode_combo.blockSignals(False)
@@ -1835,7 +1746,6 @@ class SettingsDialog(QWidget):
             QMessageBox.warning(self, "Save failed", str(exc))
 
     def _do_save(self) -> None:
-        # Capture current saved theme before writing new config
         try:
             from ..config import load_config as _lc
             _prev_theme = _lc().general.theme
@@ -1850,11 +1760,9 @@ class SettingsDialog(QWidget):
         )
         from .config_io import save_config
 
-        # Read trigger button name from label text
         btn_label_text = self._trigger_btn_label.text()
         btn_name = btn_label_text.split("  (")[0].strip() if "  (" in btn_label_text else "BTN_EXTRA"
 
-        # Audio device value — use userData when set, fall back to display text
         audio_data = self._audio_combo.currentData()
         if audio_data is not None:
             audio_val = audio_data  # "default", "", or specific device
@@ -1868,7 +1776,6 @@ class SettingsDialog(QWidget):
             else:
                 audio_val = typed
 
-        # Custom processes list
         procs = [
             self._proc_list.item(i).text()
             for i in range(self._proc_list.count())
@@ -1933,7 +1840,6 @@ class SettingsDialog(QWidget):
         _validate(cfg)
         save_config(cfg)
 
-        # If theme changed, prompt restart — live reload glitches
         if _prev_theme is not None and cfg.general.theme != _prev_theme:
             from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
             dlg = QDialog(self)
@@ -1968,7 +1874,6 @@ class SettingsDialog(QWidget):
                 self._restart_gui()
                 return
 
-        # Signal daemon to reload config (non-fatal if not running)
         try:
             from ..daemon_utils import get_daemon_pid, send_reload_signal
             pid = get_daemon_pid()

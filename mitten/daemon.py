@@ -327,8 +327,8 @@ class MittenDaemon:
 
     def _recording_name(self) -> str:
         if self._config.general.mode == "window":
-            return "clipping window with mitten"
-        return "clipping desktop with mitten"
+            return "window with mitten"
+        return "desktop with mitten"
 
     def _on_game_start(self, game: GameInfo) -> None:
         self._presence.set_state("game", detail_override=game.name, name_override=f"{game.name} with mitten")

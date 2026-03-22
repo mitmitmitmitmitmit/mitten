@@ -24,7 +24,6 @@ def get_daemon_pid() -> int | None:
     except (FileNotFoundError, ValueError, OSError):
         return None
 
-    # Verify the process exists
     try:
         os.kill(pid, 0)  # signal 0 = existence check, no actual signal
     except (ProcessLookupError, PermissionError, OSError):

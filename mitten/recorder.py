@@ -86,10 +86,6 @@ class GpuRecorder:
         self._watcher: threading.Thread | None = None
         self._crash_times: list[float] = []
 
-    # ------------------------------------------------------------------ #
-    # Public API
-    # ------------------------------------------------------------------ #
-
     def start(self, target: str = "auto") -> None:
         with self._lock:
             if self._proc and self._proc.poll() is None:
@@ -135,10 +131,6 @@ class GpuRecorder:
         """Return the gpu-screen-recorder command list (for --dry-run)."""
         t = self._resolve_target(target or self._target)
         return self._make_cmd(t)
-
-    # ------------------------------------------------------------------ #
-    # Internal
-    # ------------------------------------------------------------------ #
 
     def _resolve_target(self, target: str) -> str:
         if target != "auto":
@@ -234,7 +226,6 @@ class GpuRecorder:
         stderr_tail = (stderr_bytes or b"").decode(errors="replace").strip()[-300:]
         log.error("Recorder exited (code %d): %s", rc, stderr_tail)
 
-        # Rate-limited restart
         now = time.monotonic()
         self._crash_times = [t for t in self._crash_times if now - t < _CRASH_WINDOW]
         self._crash_times.append(now)

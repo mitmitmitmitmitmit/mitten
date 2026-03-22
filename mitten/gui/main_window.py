@@ -42,10 +42,6 @@ from ..config import PAUSE_FILE, RECORDER_DEAD_FILE
 from ..utils import format_duration, get_vram_usage
 
 
-# ------------------------------------------------------------------ #
-# Sidebar nav button
-# ------------------------------------------------------------------ #
-
 class _NavButton(QPushButton):
     def __init__(self, text: str, parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
@@ -75,10 +71,6 @@ class _NavButton(QPushButton):
             )
 
 
-# ------------------------------------------------------------------ #
-# Background update checker
-# ------------------------------------------------------------------ #
-
 class _UpdateCheckerThread(QThread):
     """Runs check_for_update() off the main thread (git fetch is slow)."""
     update_found = pyqtSignal(str, str, str)  # (old_hash, new_hash, new_version)
@@ -94,12 +86,7 @@ class _UpdateCheckerThread(QThread):
             pass
 
 
-# ------------------------------------------------------------------ #
-# Status banner
-# ------------------------------------------------------------------ #
-
 class _StatusBanner(QFrame):
-    # (ascii, label, detail, color)
     _STATES = {
         "idle": (
             "~( ^.x.^)>",
@@ -159,7 +146,6 @@ class _StatusBanner(QFrame):
         outer.setContentsMargins(16, 0, 16, 0)
         outer.setSpacing(0)
 
-        # Left text block — cat+state on row 1, detail on row 2
         left = QVBoxLayout()
         left.setSpacing(2)
         left.setAlignment(Qt.AlignmentFlag.AlignVCenter)
@@ -218,7 +204,6 @@ class _StatusBanner(QFrame):
         self._btn_toggle.setFixedSize(84, 32)
         self._btn_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        # Group buttons in a sub-layout so hidden buttons don't leave orphan spacing
         _btn_group = QWidget()
         _btn_group.setStyleSheet("background: transparent;")
         _btn_row = QHBoxLayout(_btn_group)
@@ -320,10 +305,6 @@ class _StatusBanner(QFrame):
         self._btn_update.show()
 
 
-# ------------------------------------------------------------------ #
-# Stat card
-# ------------------------------------------------------------------ #
-
 class _StatCard(QFrame):
     """Glassy stat card — label + large accent-colored value."""
 
@@ -405,10 +386,6 @@ class _StatCard(QFrame):
         self._value.setText(text)
 
 
-# ------------------------------------------------------------------ #
-# Duration prober (background thread for clip preview badge)
-# ------------------------------------------------------------------ #
-
 class _DurProber(QThread):
     """One-shot ffprobe thread — emits formatted duration string."""
     done = pyqtSignal(str)
@@ -431,10 +408,6 @@ class _DurProber(QThread):
         except Exception:
             self.done.emit("")
 
-
-# ------------------------------------------------------------------ #
-# Clip preview (auto-play muted loop)
-# ------------------------------------------------------------------ #
 
 class _ClipPreview(QFrame):
     """Auto-looping muted preview of the last clip. Hover plays audio."""
@@ -488,7 +461,6 @@ class _ClipPreview(QFrame):
             )
             layout.addWidget(placeholder, 1)
 
-        # Info strip at bottom
         self._name_label = QLabel("no clips yet")
         self._name_label.setWordWrap(False)
         self._name_label.setStyleSheet(
@@ -499,7 +471,6 @@ class _ClipPreview(QFrame):
         )
         layout.addWidget(self._name_label)
 
-        # Duration badge overlay (bottom-right, above name strip)
         self._dur_badge = QLabel(self)
         self._dur_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._dur_badge.setStyleSheet(
@@ -508,7 +479,6 @@ class _ClipPreview(QFrame):
         )
         self._dur_badge.hide()
 
-        # Play icon overlay (centered)
         self._play_icon = QLabel("▶", self)
         self._play_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._play_icon.setFixedSize(56, 56)
@@ -578,7 +548,6 @@ class _ClipPreview(QFrame):
         self._clip_path = path
         self._dur_badge.hide()
         self._play_icon.hide()
-        # Cancel any running prober
         if self._dur_prober and self._dur_prober.isRunning():
             self._dur_prober.quit()
             self._dur_prober.wait(2000)
@@ -590,7 +559,6 @@ class _ClipPreview(QFrame):
             if self._media_player:
                 self._media_player.setSource(QUrl.fromLocalFile(str(path)))
                 self._media_player.play()
-            # Probe duration in background
             self._dur_prober = _DurProber(path, self)
             self._dur_prober.done.connect(self._on_dur_ready)
             self._dur_prober.start()
@@ -619,10 +587,6 @@ class _ClipPreview(QFrame):
             self._media_player.play()
 
 
-# ------------------------------------------------------------------ #
-# Section header (bold, accent bar)
-# ------------------------------------------------------------------ #
-
 def _section_header(text: str) -> QLabel:
     lbl = QLabel(text)
     lbl.setStyleSheet(
@@ -634,10 +598,6 @@ def _section_header(text: str) -> QLabel:
     )
     return lbl
 
-
-# ------------------------------------------------------------------ #
-# Pill tab bar
-# ------------------------------------------------------------------ #
 
 class _PillTabBar(QWidget):
     """Horizontal row of pill-shaped toggle buttons backed by a QButtonGroup."""
@@ -665,7 +625,6 @@ class _PillTabBar(QWidget):
         layout.addStretch()
 
         self._group.idClicked.connect(self._on_click)
-        # Select first by default
         first = self._group.button(0)
         if first:
             first.setChecked(True)
@@ -691,10 +650,6 @@ class _PillTabBar(QWidget):
             self._style_btn(bid, self._group.id(bid) == idx)
         self.tab_changed.emit(idx)
 
-
-# ------------------------------------------------------------------ #
-# Dashboard page
-# ------------------------------------------------------------------ #
 
 class _DashboardPage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -727,14 +682,11 @@ class _DashboardPage(QWidget):
 
         perf_layout.addWidget(_section_header("PERFORMANCE"))
 
-        # Pill tab bar
         self._pill_bar = _PillTabBar(["RAM", "GPU · CPU", "CLIPS"])
         perf_layout.addWidget(self._pill_bar)
 
-        # Stacked content pages
         self._stat_stack = QStackedWidget()
 
-        # ── RAM page ──
         ram_page = QWidget()
         ram_layout = QHBoxLayout(ram_page)
         ram_layout.setContentsMargins(0, 4, 0, 0)
@@ -747,7 +699,6 @@ class _DashboardPage(QWidget):
         ram_layout.addWidget(self.card_ram_mitten)
         self._stat_stack.addWidget(ram_page)  # index 0
 
-        # ── GPU · CPU page ──
         gpu_page = QWidget()
         gpu_layout = QHBoxLayout(gpu_page)
         gpu_layout.setContentsMargins(0, 4, 0, 0)
@@ -760,7 +711,6 @@ class _DashboardPage(QWidget):
         gpu_layout.addWidget(self.card_cpu_mitten)
         self._stat_stack.addWidget(gpu_page)  # index 1
 
-        # ── CLIPS page ──
         clips_page = QWidget()
         clips_layout = QHBoxLayout(clips_page)
         clips_layout.setContentsMargins(0, 4, 0, 0)
@@ -849,10 +799,6 @@ class _DashboardPage(QWidget):
         self._start_anim("perf_expand", anim)
         fade_in(c, duration_ms=280)
 
-
-# ------------------------------------------------------------------ #
-# About page — review slider
-# ------------------------------------------------------------------ #
 
 class _ReviewSlider(QFrame):
     """Medal complaint / mitten response carousel."""
@@ -1033,10 +979,6 @@ class _ReviewSlider(QFrame):
             )
 
 
-# ------------------------------------------------------------------ #
-# About page — system info collapsible
-# ------------------------------------------------------------------ #
-
 class _SysInfoSection(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -1109,10 +1051,6 @@ class _SysInfoSection(QWidget):
             lbl.setText(rows[i] if i < len(rows) else "")
 
 
-# ------------------------------------------------------------------ #
-# About page
-# ------------------------------------------------------------------ #
-
 class _AboutPage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1169,7 +1107,6 @@ class _AboutPage(QWidget):
             )
             return lbl
 
-        # ── Version badge + tagline ──
         ver_row = QHBoxLayout()
         ver_row.setContentsMargins(0, 0, 0, 0)
         ver_row.setSpacing(10)
@@ -1193,7 +1130,6 @@ class _AboutPage(QWidget):
             C.SUBTEXT, 14,
         ))
 
-        # Light mode: ~50% chance — slip an abuse label between the tagline and the first section
         try:
             from . import themes as _themes_mod
             if _themes_mod.LIGHT_MODE_ACTIVE and random.random() < 0.5:
@@ -1212,7 +1148,6 @@ class _AboutPage(QWidget):
         layout.addWidget(_divider())
         layout.addWidget(_gap(20))
 
-        # ── Why mitten exists ──
         layout.addWidget(_h("why i made this", 15, C.LAVENDER))
         layout.addWidget(_gap(10))
         layout.addWidget(_p(
@@ -1236,7 +1171,6 @@ class _AboutPage(QWidget):
         layout.addWidget(_divider())
         layout.addWidget(_gap(20))
 
-        # ── What it does ──
         layout.addWidget(_h("what it does", 15, C.GREEN))
         layout.addWidget(_gap(10))
         features = [
@@ -1265,7 +1199,6 @@ class _AboutPage(QWidget):
         layout.addWidget(_divider())
         layout.addWidget(_gap(20))
 
-        # ── vs medal carousel ──
         layout.addWidget(_h("vs medal", 15, C.PINK))
         layout.addWidget(_gap(10))
         layout.addWidget(_ReviewSlider())
@@ -1274,7 +1207,6 @@ class _AboutPage(QWidget):
         layout.addWidget(_divider())
         layout.addWidget(_gap(20))
 
-        # ── Built with pills ──
         layout.addWidget(_h("built with", 15, C.ORANGE))
         layout.addWidget(_gap(12))
         pills_row = QHBoxLayout()
@@ -1305,11 +1237,9 @@ class _AboutPage(QWidget):
         layout.addWidget(_divider())
         layout.addWidget(_gap(20))
 
-        # ── Changelog ──
         _GITHUB = "https://github.com/mitmitmitmitmitmit/mitten"
         _COMMIT = _GITHUB + "/commit/{}"
 
-        # header row: "changelog" + "full history →" link aligned right
         ch_row = QHBoxLayout()
         ch_row.setContentsMargins(0, 0, 0, 0)
         ch_row.setSpacing(8)
@@ -1324,7 +1254,6 @@ class _AboutPage(QWidget):
         layout.addLayout(ch_row)
         layout.addWidget(_gap(10))
 
-        # (version, short_hash, notes, is_hotfix)
         _changelog_entries = [
             ("0.2.25",   "0000000", "about page polish, README cleanup, copy pass", False),
             ("0.2.24",   "fac86b6", "discord rich presence, dead code cleanup", False),
@@ -1337,7 +1266,6 @@ class _AboutPage(QWidget):
             ("0.2.19.1", "d11ea99", "light mode abuse sounds, hint label fixes", True),
             ("0.2.19",   "00e622c", "dev mode, theme overhaul, sounds, CQ slider, dual codec", False),
         ]
-        # Light mode: replace one hotfix description with abuse
         try:
             from . import themes as _themes_mod
             if _themes_mod.LIGHT_MODE_ACTIVE:
@@ -1378,7 +1306,6 @@ class _AboutPage(QWidget):
         layout.addWidget(_divider())
         layout.addWidget(_gap(20))
 
-        # ── GitHub link ──
         gh_lbl = QLabel(f'<a href="{_GITHUB}">view source on github</a>')
         gh_lbl.setOpenExternalLinks(True)
         gh_lbl.setStyleSheet(
@@ -1405,10 +1332,6 @@ class _AboutPage(QWidget):
         outer.addWidget(scroll)
 
 
-
-# ------------------------------------------------------------------ #
-# Debug page (developer mode)
-# ------------------------------------------------------------------ #
 
 class _DebugPage(QWidget):
     """Developer debug panel — test notifications, system info, log viewer, extra tools."""
@@ -1581,7 +1504,6 @@ class _DebugPage(QWidget):
             card_layout.addWidget(row_w)
             return v
 
-        # ── Page header ─────────────────────────────────────────────── #
         layout.addWidget(_h("debug panel", 18, C.LAVENDER))
         layout.addWidget(_gap(4))
         layout.addWidget(_sub("developer tools — only shown when developer_mode is enabled"))
@@ -1589,7 +1511,6 @@ class _DebugPage(QWidget):
         layout.addWidget(_divider())
         layout.addWidget(_gap(20))
 
-        # ── DAEMON STATUS ────────────────────────────────────────────── #
         layout.addWidget(_sep("DAEMON STATUS"))
         layout.addWidget(_gap(10))
 
@@ -1609,7 +1530,6 @@ class _DebugPage(QWidget):
         layout.addWidget(_divider())
         layout.addWidget(_gap(20))
 
-        # ── TESTING ─────────────────────────────────────────────────── #
         layout.addWidget(_sep("TESTING"))
         layout.addWidget(_gap(10))
         layout.addWidget(_action_row(
@@ -1628,7 +1548,6 @@ class _DebugPage(QWidget):
         layout.addWidget(_divider())
         layout.addWidget(_gap(20))
 
-        # ── CLIP METRICS ─────────────────────────────────────────────── #
         layout.addWidget(_sep("CLIP METRICS"))
         layout.addWidget(_gap(10))
 
@@ -1646,7 +1565,6 @@ class _DebugPage(QWidget):
         layout.addWidget(_divider())
         layout.addWidget(_gap(20))
 
-        # ── SYSTEM DETECTION ────────────────────────────────────────── #
         layout.addWidget(_sep("SYSTEM DETECTION"))
         layout.addWidget(_gap(10))
 
@@ -1664,7 +1582,6 @@ class _DebugPage(QWidget):
         layout.addWidget(_divider())
         layout.addWidget(_gap(20))
 
-        # ── FILE ACTIONS ─────────────────────────────────────────────── #
         layout.addWidget(_sep("FILE ACTIONS"))
         layout.addWidget(_gap(10))
         layout.addWidget(_action_row(
@@ -1682,7 +1599,6 @@ class _DebugPage(QWidget):
         layout.addWidget(_divider())
         layout.addWidget(_gap(20))
 
-        # ── DANGER ZONE ──────────────────────────────────────────────── #
         layout.addWidget(_sep("DANGER ZONE"))
         layout.addWidget(_gap(10))
         layout.addWidget(_action_row(
@@ -1697,7 +1613,6 @@ class _DebugPage(QWidget):
         layout.addWidget(_divider())
         layout.addWidget(_gap(20))
 
-        # ── DAEMON LOG ───────────────────────────────────────────────── #
         log_hdr_row = QHBoxLayout()
         log_hdr_row.setContentsMargins(0, 0, 0, 0)
         log_hdr_row.setSpacing(10)
@@ -1733,7 +1648,6 @@ class _DebugPage(QWidget):
 
         outer.addWidget(scroll)
 
-        # Auto-load log + status on first show
         self._log_loaded = False
 
     def _refresh_status(self) -> None:
@@ -1857,7 +1771,6 @@ class _DebugPage(QWidget):
         import os as _os
         lines: list[str] = []
 
-        # GPU + VRAM
         try:
             r = subprocess.run(
                 ["nvidia-smi", "--query-gpu=name,memory.total,memory.used",
@@ -1872,7 +1785,6 @@ class _DebugPage(QWidget):
         except Exception:
             lines.append("gpu       (nvidia-smi not available)")
 
-        # CPU
         try:
             for line in Path("/proc/cpuinfo").read_text().splitlines():
                 if "model name" in line:
@@ -1882,7 +1794,6 @@ class _DebugPage(QWidget):
         except Exception:
             lines.append("cpu       (unavailable)")
 
-        # RAM
         try:
             for line in Path("/proc/meminfo").read_text().splitlines():
                 if line.startswith("MemTotal:"):
@@ -1892,11 +1803,9 @@ class _DebugPage(QWidget):
         except Exception:
             lines.append("ram       (unavailable)")
 
-        # Display server
         display = _os.environ.get("WAYLAND_DISPLAY") or _os.environ.get("DISPLAY") or "unknown"
         lines.append(f"display   {display}")
 
-        # gpu-screen-recorder version
         try:
             r = subprocess.run(
                 ["gpu-screen-recorder", "--version"],
@@ -1918,7 +1827,6 @@ class _DebugPage(QWidget):
             if pid is None:
                 self._log_view.appendPlainText("[clear buffer] daemon is not running")
                 return
-            # SIGUSR1 triggers a save/flush of the current buffer
             os.kill(pid, _signal.SIGUSR1)
             self._log_view.appendPlainText("[clear buffer] SIGUSR1 sent to daemon")
         except Exception as exc:
@@ -1935,14 +1843,9 @@ class _DebugPage(QWidget):
         except Exception as exc:
             text = f"(error reading journal: {exc})"
         self._log_view.setPlainText(text)
-        # Scroll to bottom
         sb = self._log_view.verticalScrollBar()
         sb.setValue(sb.maximum())
 
-
-# ------------------------------------------------------------------ #
-# Main window
-# ------------------------------------------------------------------ #
 
 class MittenMainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -1957,25 +1860,21 @@ class MittenMainWindow(QMainWindow):
         self._last_clip_path: Path | None = None
         self._schizo_tick: int = 0  # counts _refresh() calls; used for light-mode schizo effects
 
-        # Cache deps check — gpu-screen-recorder presence, checked once on init
         try:
             from .system_setup import check_dependencies
             self._has_gsr = check_dependencies().get("gpu-screen-recorder", False)
         except Exception:
             self._has_gsr = True  # assume present if check fails
 
-        # Whether settings sub-nav is showing in the sidebar
         self._settings_nav_active = False
         self._previous_page_idx: int = 0
 
-        # Animation registry — prevents stacking when animations are re-triggered
         self._anims: dict[str, QPropertyAnimation] = {}
         self._stagger_timers: list[QTimer] = []
 
         self._build_ui()
         self._connect_signals()
 
-        # Apply developer mode from config at startup (show/hide Debug nav button)
         try:
             from ..config import load_config
             if load_config().general.developer_mode:
@@ -1991,7 +1890,6 @@ class MittenMainWindow(QMainWindow):
         self._save_flash.setSingleShot(True)
         self._save_flash.timeout.connect(self._refresh)
 
-        # Update checker — runs every 60s in background thread (git fetch is slow)
         self._update_hashes: tuple[str, str] | None = None
         self._update_checker: _UpdateCheckerThread | None = None
         self._update_timer = QTimer(self)
@@ -2002,14 +1900,11 @@ class MittenMainWindow(QMainWindow):
 
         self._refresh()
 
-        # Wink timer — cat occasionally winks in dark mode (random 45-120s interval)
         self._wink_timer = QTimer(self)
         self._wink_timer.setSingleShot(True)
         self._wink_timer.timeout.connect(self._do_wink)
         self._wink_timer.start(self._next_wink_delay())
 
-        # Light mode torture timers — only fire if light mode is active at trigger time
-        # 30-minute fake "update required" dialog
         self._lm_fake_update_timer = QTimer(self)
         self._lm_fake_update_timer.setSingleShot(True)
         self._lm_fake_update_timer.timeout.connect(self._show_fake_update_dialog)
@@ -2020,10 +1915,6 @@ class MittenMainWindow(QMainWindow):
         except Exception:
             pass
 
-    # ------------------------------------------------------------------ #
-    # UI construction
-    # ------------------------------------------------------------------ #
-
     def _build_ui(self) -> None:
         central = QWidget()
         central.setObjectName("centralWidget")
@@ -2033,7 +1924,6 @@ class MittenMainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Sidebar ──
         sidebar = QWidget()
         sidebar.setFixedWidth(140)
         sidebar.setStyleSheet(
@@ -2045,7 +1935,6 @@ class MittenMainWindow(QMainWindow):
         self._sidebar_layout.setContentsMargins(0, 14, 0, 14)
         self._sidebar_layout.setSpacing(0)
 
-        # Logo
         try:
             from . import themes as _themes_mod
             _initial_cat = _themes_mod.get_light_mode_cat() if _themes_mod.LIGHT_MODE_ACTIVE else CAT
@@ -2067,7 +1956,6 @@ class MittenMainWindow(QMainWindow):
         self._logo_stage = 0
         self._sidebar_layout.addWidget(logo)
 
-        # Progressive cat anger timer — checks every 60s in light mode
         self._cat_stage_timer = QTimer(self)
         self._cat_stage_timer.setInterval(60_000)
         self._cat_stage_timer.timeout.connect(self._update_cat_stage)
@@ -2086,7 +1974,6 @@ class MittenMainWindow(QMainWindow):
         )
         self._sidebar_layout.addWidget(title)
 
-        # Main nav buttons
         self._nav_dashboard = _NavButton("Dashboard")
         self._nav_clips     = _NavButton("Clips")
         self._nav_settings  = _NavButton("Settings")
@@ -2101,7 +1988,6 @@ class MittenMainWindow(QMainWindow):
             self._sidebar_layout.addWidget(btn)
         self._sidebar_layout.addWidget(self._nav_debug)
 
-        # Light mode: randomly assign abuse tooltips to 2 nav buttons
         try:
             from . import themes as _themes_mod
             if _themes_mod.LIGHT_MODE_ACTIVE:
@@ -2113,7 +1999,6 @@ class MittenMainWindow(QMainWindow):
         except Exception:
             pass
 
-        # Settings sub-nav (hidden by default)
         self._nav_back = _NavButton("\u2190  Back")
         self._nav_back.setVisible(False)
 
@@ -2175,7 +2060,6 @@ class MittenMainWindow(QMainWindow):
 
         root.addWidget(sidebar)
 
-        # ── Pages ──
         self._pages = QStackedWidget()
         self._pages.setStyleSheet(f"background-color: {C.BG};")
 
@@ -2198,10 +2082,6 @@ class MittenMainWindow(QMainWindow):
 
         root.addWidget(self._pages, 1)
 
-    # ------------------------------------------------------------------ #
-    # Signal wiring
-    # ------------------------------------------------------------------ #
-
     def _next_wink_delay(self) -> int:
         import random as _r
         return _r.randint(45_000, 120_000)
@@ -2213,17 +2093,14 @@ class MittenMainWindow(QMainWindow):
             if _t.LIGHT_MODE_ACTIVE:
                 self._wink_timer.start(self._next_wink_delay())
                 return
-            # Don't interrupt the clips vibe cycle
             if self._pages.currentIndex() == 1 and self._clips_page._is_vibing:
                 self._wink_timer.start(self._next_wink_delay())
                 return
             import random as _r
             wink = _r.choice([_t.DARK_CAT_WINK, _t.DARK_CAT_WINK2])
             self._logo_label.setText(wink)
-            # Meow ~30% of the time
             if _r.random() < 0.30:
                 _t.play_dark_meow()
-            # Restore to page-appropriate cat after 400ms
             page = self._pages.currentIndex()
             QTimer.singleShot(400, lambda: self._logo_label.setText(
                 _t.get_page_cat(page, app_state=self._state)
@@ -2314,7 +2191,6 @@ class MittenMainWindow(QMainWindow):
             self._logo_label.setText(look_cat)
 
             def _settle() -> None:
-                # Don't clobber if clips page is driving the cat (vibing)
                 if dest_page == 1 and self._clips_page._is_vibing:
                     return
                 page_cat = _t.get_page_cat(dest_page, app_state=self._state)
@@ -2332,7 +2208,6 @@ class MittenMainWindow(QMainWindow):
         self._nav_debug.clicked.connect(lambda: self._switch_main_page(4))
         self._nav_back.clicked.connect(self._exit_settings)
 
-        # Clips page cat signal → sidebar logo sync
         self._clips_page.cat_state_changed.connect(self._on_clip_cat_state)
 
         for i, btn in enumerate(self._settings_nav_buttons):
@@ -2367,10 +2242,6 @@ class MittenMainWindow(QMainWindow):
         anim = fade_out(btn, duration_ms=50, on_done=lambda: fade_in(btn, duration_ms=100))
         self._start_anim(f"btn_dip_{id(btn)}", anim)
 
-    # ------------------------------------------------------------------ #
-    # Navigation
-    # ------------------------------------------------------------------ #
-
     def _switch_main_page(self, index: int) -> None:
         if self._pages.currentIndex() == index:
             return
@@ -2389,7 +2260,6 @@ class MittenMainWindow(QMainWindow):
         self._settings_nav_active = True
         self._fade_sidebar(show_settings=True)
         self._fade_to(2)
-        # Select General by default
         self._switch_settings_section(0)
 
     def _exit_settings(self) -> None:
@@ -2399,7 +2269,6 @@ class MittenMainWindow(QMainWindow):
         self._fade_to(self._previous_page_idx)
         for i, btn in enumerate(self._main_nav_buttons):
             btn.setChecked(i == self._previous_page_idx)
-        # Restore logo for destination page
         try:
             from . import themes as _t
             self._logo_label.setText(_t.get_page_cat(self._previous_page_idx, app_state=self._state))
@@ -2419,7 +2288,6 @@ class MittenMainWindow(QMainWindow):
             self._nav_back.setVisible(False)
             for btn in self._settings_nav_buttons:
                 btn.setVisible(False)
-            # Restore debug button visibility based on developer mode state
             try:
                 from ..config import load_config
                 if load_config().general.developer_mode:
@@ -2455,10 +2323,6 @@ class MittenMainWindow(QMainWindow):
         new_w = self._pages.currentWidget()
         from .anim import slide_fade_in
         self._start_anim("page_slide", slide_fade_in(new_w, direction=direction, distance=16, duration_ms=180))
-
-    # ------------------------------------------------------------------ #
-    # State & refresh
-    # ------------------------------------------------------------------ #
 
     def _set_state(self, state: str, detail: str = "") -> None:
         self._state = state
@@ -2634,10 +2498,6 @@ class MittenMainWindow(QMainWindow):
 
         self._dashboard.clip_preview.set_clip(clips[0])
 
-    # ------------------------------------------------------------------ #
-    # Actions / Update checker
-    # ------------------------------------------------------------------ #
-
     def _run_update_check(self) -> None:
         """Start a background thread to check for updates. Skips if one is already running."""
         if self._update_checker and self._update_checker.isRunning():
@@ -2654,7 +2514,6 @@ class MittenMainWindow(QMainWindow):
 
         display_ver = f"v{new_ver}" if new_ver else new_hash
 
-        # Desktop notification
         from .. import notify as _notify
         _notify.notify(
             f"{CAT}  Mitten update available",
@@ -2662,10 +2521,8 @@ class MittenMainWindow(QMainWindow):
             urgency="normal", icon="software-update-available", timeout_ms=6000,
         )
 
-        # Show Update button in status banner
         self._dashboard.banner.show_update_available()
 
-        # Update sidebar version display
         self._ver_label.hide()
         self._ver_row_label.setText(
             f'<span style="color:{C.PINK}; font-size:9px;">v{self._current_ver}</span>'
