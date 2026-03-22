@@ -785,7 +785,8 @@ def _stage5_reveal(parent: QWidget) -> None:
 class SettingsDialog(QWidget):
     """MITTEN settings — headless QStackedWidget, nav controlled by main window."""
 
-    developer_mode_toggled = pyqtSignal(bool)  # emitted when developer mode checkbox changes
+    developer_mode_toggled = pyqtSignal(bool)   # emitted when developer mode checkbox changes
+    section_changed        = pyqtSignal(str)    # "left" or "right" when nav section switches
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -870,6 +871,7 @@ class SettingsDialog(QWidget):
         if old_idx == idx:
             return
         direction = "left" if idx > old_idx else "right"
+        self.section_changed.emit(direction)
         self._pages.setCurrentIndex(idx)
         page = self._pages.currentWidget()
         if page:

@@ -2294,6 +2294,17 @@ class MittenMainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _on_settings_section_look(self, direction: str) -> None:
+        """Cat glances when switching settings sections, then settles back to settings cat."""
+        try:
+            from . import themes as _t
+            self._logo_label.setText(_t.get_look_cat(direction))
+            QTimer.singleShot(350, lambda: self._logo_label.setText(
+                _t.get_page_cat(2, app_state=self._state)
+            ))
+        except Exception:
+            pass
+
     def _do_nav_look(self, direction: str, dest_page: int) -> None:
         """Flash a look-left/right cat on the sidebar logo for ~450ms, then settle on
         the destination page cat. Gives the feeling of the cat glancing toward the new page."""
@@ -2339,6 +2350,7 @@ class MittenMainWindow(QMainWindow):
 
         # Developer mode toggle from settings (no restart required)
         self._settings_page.developer_mode_toggled.connect(self._on_dev_mode_toggled)
+        self._settings_page.section_changed.connect(self._on_settings_section_look)
 
     def _start_anim(self, key: str, anim: QPropertyAnimation) -> None:
         """Stop any existing animation at this key, register and start the new one."""
