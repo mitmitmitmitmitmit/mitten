@@ -746,6 +746,8 @@ class SettingsDialog(QWidget):
 
     developer_mode_toggled = pyqtSignal(bool)   # emitted when developer mode checkbox changes
     section_changed        = pyqtSignal(str)    # "left" or "right" when nav section switches
+    discord_preview        = pyqtSignal(object) # emitted live when discord settings change (DiscordConfig)
+    settings_saved         = pyqtSignal()       # emitted after a successful save
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1474,7 +1476,26 @@ class SettingsDialog(QWidget):
         hint_anim.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px;")
         form.addRow("", hint_anim)
 
+        for cb in (self._dc_enabled, self._dc_show_game_name, self._dc_show_mode_label,
+                   self._dc_show_name, self._dc_show_ascii, self._dc_animated_ascii):
+            cb.stateChanged.connect(self._emit_discord_preview)
+
         return page
+
+    def _emit_discord_preview(self) -> None:
+        try:
+            from ..config import DiscordConfig
+            dc = DiscordConfig(
+                enabled=self._dc_enabled.isChecked(),
+                show_ascii=self._dc_show_ascii.isChecked(),
+                animated_ascii=self._dc_animated_ascii.isChecked(),
+                show_game_name=self._dc_show_game_name.isChecked(),
+                show_mode_label=self._dc_show_mode_label.isChecked(),
+                show_name=self._dc_show_name.isChecked(),
+            )
+            self.discord_preview.emit(dc)
+        except Exception:
+            pass
 
     def _on_disable_abuse_clicked(self) -> None:
         """Anti-disable gauntlet — always keeps abuse on, just cycles through stages."""
@@ -1928,6 +1949,7 @@ class SettingsDialog(QWidget):
 
         _validate(cfg)
         save_config(cfg)
+        self.settings_saved.emit()
 
         if _prev_theme is not None and cfg.general.theme != _prev_theme:
             from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton

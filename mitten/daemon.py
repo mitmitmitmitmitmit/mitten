@@ -362,6 +362,7 @@ class MittenDaemon:
                 elif gui_was_active:
                     gui_was_active = False
                     last_mtime = None
+                    self._presence.reset_rate_limit()
                     self._presence.set_state(
                         self._daemon_state,
                         self._daemon_state_ov,

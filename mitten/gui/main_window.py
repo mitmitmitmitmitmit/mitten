@@ -1864,6 +1864,7 @@ class MittenMainWindow(QMainWindow):
         self._gui_settings_idx: int = 0
         self._gui_clip_path: object = None
         self._gui_clip_dur: int = 0
+        self._gui_dc_preview: object = None  # live DiscordConfig from settings widgets
 
         try:
             from .system_setup import check_dependencies
@@ -2188,6 +2189,10 @@ class MittenMainWindow(QMainWindow):
         self._gui_clip_dur = dur
         self._mark_gui_presence_dirty()
 
+    def _on_discord_preview(self, dc) -> None:
+        self._gui_dc_preview = dc
+        self._flush_gui_presence()
+
     def _on_settings_section_look(self, direction: str) -> None:
         """Cat glances when switching settings sections, then settles back to settings cat."""
         try:
@@ -2225,7 +2230,7 @@ class MittenMainWindow(QMainWindow):
             import json
             from . import themes as _t
             from ..config import load_config, GUI_PRESENCE_FILE
-            dc = load_config().discord
+            dc = self._gui_dc_preview if self._gui_dc_preview is not None else load_config().discord
             if not dc.enabled:
                 return
 
@@ -2347,6 +2352,8 @@ class MittenMainWindow(QMainWindow):
 
         self._clips_page.cat_state_changed.connect(self._on_clip_cat_state)
         self._clips_page.clip_selected.connect(self._on_clip_selected)
+        self._settings_page.discord_preview.connect(self._on_discord_preview)
+        self._settings_page.settings_saved.connect(lambda: setattr(self, "_gui_dc_preview", None))
 
         for i, btn in enumerate(self._settings_nav_buttons):
             btn.clicked.connect(lambda _, idx=i: self._switch_settings_section(idx))
