@@ -1177,7 +1177,7 @@ class SettingsDialog(QWidget):
         self._container_combo.addItems(["mp4", "mkv", "mov"])
         form.addRow("Container", self._container_combo)
 
-        self._auto_compress = QCheckBox("Re-compress after saving (slower, smaller file)")
+        self._auto_compress = QCheckBox("Auto compression (compresses to target size after saving)")
         form.addRow("", self._auto_compress)
 
         target_row = QHBoxLayout()
