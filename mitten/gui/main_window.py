@@ -1891,7 +1891,7 @@ class MittenMainWindow(QMainWindow):
         self._gui_presence_timer = QTimer(self)
         self._gui_presence_timer.setInterval(5000)
         self._gui_presence_timer.timeout.connect(self._mark_gui_presence_dirty)
-        self._gui_presence_timer.start()
+        # Timer only runs while window is focused — started in changeEvent(WindowActivate)
         self._init_gui_presence()
 
         self._timer = QTimer(self)
@@ -2734,11 +2734,20 @@ class MittenMainWindow(QMainWindow):
     def changeEvent(self, event) -> None:
         from PyQt6.QtCore import QEvent
         super().changeEvent(event)
-        if event.type() == QEvent.Type.WindowActivate and self._gui_presence is not None:
+        if self._gui_presence is None:
+            return
+        if event.type() == QEvent.Type.WindowActivate:
             self._gui_presence_last_send = 0.0
             self._gui_presence.reset_rate_limit()
             self._gui_presence_dirty = True
+            self._gui_presence_timer.start()
             self._flush_gui_presence()
+        elif event.type() == QEvent.Type.WindowDeactivate:
+            self._gui_presence_timer.stop()
+            try:
+                self._gui_presence.clear()
+            except Exception:
+                pass
 
     def closeEvent(self, event) -> None:
         # Cancel any pending stagger timers (Bug 2-1: QTimer on destroyed widgets)
