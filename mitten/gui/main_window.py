@@ -2734,7 +2734,7 @@ class MittenMainWindow(QMainWindow):
     def changeEvent(self, event) -> None:
         from PyQt6.QtCore import QEvent
         super().changeEvent(event)
-        if self._gui_presence is None:
+        if getattr(self, "_gui_presence", None) is None:
             return
         if event.type() == QEvent.Type.WindowActivate:
             self._gui_presence_last_send = 0.0
