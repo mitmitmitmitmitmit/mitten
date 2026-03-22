@@ -34,7 +34,7 @@ _CLIENT_ID = "1484018158300823643"
 _PRESENCE_STATES: dict[str, tuple[str, str]] = {
     "idle":          ("idle",              "~( ^.x.^)>  waiting for something good"),
     "recording":     ("recording",         "~( ^.x.^)>  Mitten is watching\u2026"),
-    "game":          ("game mode",         "(=ʘωʘ=)✨  recording gameplay"),
+    "game":          ("game mode",         "~( >.x.<)> \u2728  recording gameplay"),
     "saving":        ("saving clip",       "~( ^.x.^)> \u266a  caught one!"),
     "paused":        ("paused",            "~( ^.-.-)>  buffer paused"),
     "session":       ("session recording", "~( ^.x.^)>  recording full session"),

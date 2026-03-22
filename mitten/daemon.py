@@ -338,12 +338,14 @@ class MittenDaemon:
     def _on_game_start(self, game: GameInfo) -> None:
         dc = self._config.discord
         if dc.show_game_name:
-            detail = f"(=\u0298\u03c9\u0298=)\u2728  Mitten is watching {game.name}"
+            detail = "~( >.x.<)> \u2728" if dc.show_ascii else None
+            state = f"Mitten is watching {game.name}"
             name = f"{game.name} with Mitten" if dc.show_name else None
         else:
-            detail = None  # falls back to preset "(=ʘωʘ=)✨  recording gameplay"
+            detail = None
+            state = None
             name = ("clipping with Mitten" if dc.show_mode_label else "Mitten") if dc.show_name else None
-        self._presence.set_state("game", detail_override=detail, name_override=name)
+        self._presence.set_state("game", state_override=state, detail_override=detail, name_override=name)
         log.info("Game started: %s", game.name)
         if self._config.notifications.enabled:
             notify.notify(

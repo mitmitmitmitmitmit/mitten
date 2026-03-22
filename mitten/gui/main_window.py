@@ -1890,7 +1890,7 @@ class MittenMainWindow(QMainWindow):
 
         self._gui_presence_timer = QTimer(self)
         self._gui_presence_timer.setInterval(5000)
-        self._gui_presence_timer.timeout.connect(self._flush_gui_presence)
+        self._gui_presence_timer.timeout.connect(self._mark_gui_presence_dirty)
         self._gui_presence_timer.start()
         self._init_gui_presence()
 
@@ -2730,6 +2730,14 @@ class MittenMainWindow(QMainWindow):
         # If debug was the active page and we're hiding it, go back to dashboard
         if not enabled and self._pages.currentIndex() == 4:
             self._switch_main_page(0)
+
+    def changeEvent(self, event) -> None:
+        from PyQt6.QtCore import QEvent
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowActivate and self._gui_presence is not None:
+            self._gui_presence_last_send = 0.0  # bypass rate limiter
+            self._gui_presence_dirty = True
+            self._flush_gui_presence()
 
     def closeEvent(self, event) -> None:
         # Cancel any pending stagger timers (Bug 2-1: QTimer on destroyed widgets)
