@@ -80,7 +80,7 @@ DARK_CAT_WINK      = "~( ^.x.-)>"    # left eye closed
 DARK_CAT_WINK2     = "~( -.x.^)>"    # right eye closed
 DARK_CAT_SAVING    = "~( ^.x.^)> ♪"
 DARK_CAT_PAUSED    = "~( ^.-.-)>"
-DARK_CAT_GAME      = "(=ʘωʘ=)✨"
+DARK_CAT_GAME      = "~( >.x.<)> ✨"
 DARK_CAT_ERROR     = "~( x.x.^)>"
 DARK_CAT_HAPPY     = "~( ≧.x.≦)>"    # after saving a clip
 DARK_CAT_SLEEPY    = "~( -.x.-)> zzz"  # long idle / clips page idle
