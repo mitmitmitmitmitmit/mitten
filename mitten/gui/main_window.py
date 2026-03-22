@@ -1860,9 +1860,6 @@ class MittenMainWindow(QMainWindow):
         self._last_clip_path: Path | None = None
         self._schizo_tick: int = 0  # counts _refresh() calls; used for light-mode schizo effects
 
-        self._gui_presence = None
-        self._gui_presence_last_send: float = 0.0
-        self._gui_presence_dirty: bool = False
         self._gui_cat_state: str = "sleepy"
         self._gui_settings_idx: int = 0
 
@@ -1890,9 +1887,8 @@ class MittenMainWindow(QMainWindow):
 
         self._gui_presence_timer = QTimer(self)
         self._gui_presence_timer.setInterval(5000)
-        self._gui_presence_timer.timeout.connect(self._mark_gui_presence_dirty)
+        self._gui_presence_timer.timeout.connect(self._flush_gui_presence)
         # Timer only runs while window is focused — started in changeEvent(WindowActivate)
-        self._init_gui_presence()
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
@@ -2214,60 +2210,28 @@ class MittenMainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _init_gui_presence(self) -> None:
-        try:
-            from ..config import load_config
-            from ..discord_presence import DiscordPresence
-            cfg = load_config()
-            if not cfg.discord.enabled:
-                return
-            self._gui_presence = DiscordPresence()
-            self._gui_presence.update_config(show_ascii=cfg.discord.show_ascii)
-            self._gui_presence.start()
-            self._mark_gui_presence_dirty()
-        except Exception:
-            pass
-
     def _mark_gui_presence_dirty(self) -> None:
-        self._gui_presence_dirty = True
-        import time
-        if time.time() - self._gui_presence_last_send >= 4.0:
-            self._flush_gui_presence()
+        self._flush_gui_presence()
 
     def _flush_gui_presence(self) -> None:
-        if not self._gui_presence_dirty or self._gui_presence is None:
-            return
-        import time
-        self._gui_presence_dirty = False
-        self._gui_presence_last_send = time.time()
         try:
+            import json
             from . import themes as _t
-            from ..config import load_config
+            from ..config import load_config, GUI_PRESENCE_FILE
             dc = load_config().discord
             if not dc.enabled:
                 return
-            self._gui_presence.update_config(show_ascii=dc.show_ascii)
 
-            # Light mode always hijacks
             if _t.LIGHT_MODE_ACTIVE:
                 lm_cat = _t.get_light_mode_cat()
                 detail = f"{lm_cat}  why" if dc.show_ascii else "why"
-                self._gui_presence.set_state(
-                    "idle",
-                    state_override="light mode loving FREAK",
-                    detail_override=detail,
-                    name_override="Mitten (L)",
-                )
-                return
+                data = {"state_override": "light mode loving FREAK", "detail_override": detail, "name_override": "Mitten (L)"}
+            else:
+                page = self._pages.currentIndex()
+                state_ov, detail_ov, name_ov = self._gui_presence_strings(page, dc)
+                data = {"state_override": state_ov, "detail_override": detail_ov, "name_override": name_ov if dc.show_name else None}
 
-            page = self._pages.currentIndex()
-            state_ov, detail_ov, name_ov = self._gui_presence_strings(page, dc)
-            self._gui_presence.set_state(
-                "idle",
-                state_override=state_ov,
-                detail_override=detail_ov,
-                name_override=name_ov if dc.show_name else None,
-            )
+            GUI_PRESENCE_FILE.write_text(json.dumps(data))
         except Exception:
             pass
 
@@ -2734,18 +2698,16 @@ class MittenMainWindow(QMainWindow):
     def changeEvent(self, event) -> None:
         from PyQt6.QtCore import QEvent
         super().changeEvent(event)
-        if getattr(self, "_gui_presence", None) is None:
+        if not hasattr(self, "_gui_presence_timer"):
             return
         if event.type() == QEvent.Type.WindowActivate:
-            self._gui_presence_last_send = 0.0
-            self._gui_presence.reset_rate_limit()
-            self._gui_presence_dirty = True
             self._gui_presence_timer.start()
             self._flush_gui_presence()
         elif event.type() == QEvent.Type.WindowDeactivate:
             self._gui_presence_timer.stop()
             try:
-                self._gui_presence.clear()
+                from ..config import GUI_PRESENCE_FILE
+                GUI_PRESENCE_FILE.unlink(missing_ok=True)
             except Exception:
                 pass
 
@@ -2760,12 +2722,11 @@ class MittenMainWindow(QMainWindow):
             self._update_checker.quit()
             self._update_checker.wait(2000)
 
-        if self._gui_presence is not None:
-            try:
-                self._gui_presence.clear()
-                self._gui_presence.stop()
-            except Exception:
-                pass
+        try:
+            from ..config import GUI_PRESENCE_FILE
+            GUI_PRESENCE_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
 
         self.hide()
         event.ignore()

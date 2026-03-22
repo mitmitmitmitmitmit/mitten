@@ -16,6 +16,7 @@ DEFAULT_CONFIG_SRC = Path(__file__).parent.parent / "default_config.toml"
 TMP_DIR = Path("/tmp/mitten")
 PID_FILE = TMP_DIR / "mitten.pid"
 GUI_SOCKET = TMP_DIR / "gui.sock"
+GUI_PRESENCE_FILE = TMP_DIR / "gui_presence.json"  # written by GUI when focused, read by daemon
 PAUSE_FILE = TMP_DIR / "paused"          # exists ↔ recording is paused
 RECORDER_DEAD_FILE = TMP_DIR / "recorder_dead"  # exists ↔ recorder gave up
 

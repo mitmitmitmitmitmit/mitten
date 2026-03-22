@@ -5,6 +5,7 @@ fires watermark post-processing, and coordinates game detection + trigger.
 from __future__ import annotations
 
 import fcntl
+import json
 import logging
 import os
 import signal
@@ -14,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from .config import MittenConfig, TMP_DIR, PID_FILE, PAUSE_FILE, RECORDER_DEAD_FILE
+from .config import MittenConfig, TMP_DIR, PID_FILE, PAUSE_FILE, RECORDER_DEAD_FILE, GUI_PRESENCE_FILE
 from .detect import GameDetector, GameInfo
 from .recorder import GpuRecorder, SessionRecorder
 from .trigger import TriggerListener
@@ -96,6 +97,11 @@ class MittenDaemon:
         self._pid_fd = None  # held open for lifetime of process to maintain flock
         self._save_timer: threading.Timer | None = None
         self._presence = DiscordPresence()
+        # Track daemon's own current state so we can re-assert it when GUI deactivates
+        self._daemon_state: str = "idle"
+        self._daemon_state_ov: str | None = None
+        self._daemon_detail_ov: str | None = None
+        self._daemon_name_ov: str | None = None
         self._recorder = GpuRecorder(config, on_crash=self._on_recorder_crash)
         self._session_recorder = SessionRecorder(config)
         self._watcher = ClipWatcher(on_clip_ready=self._on_clip_ready)
@@ -128,14 +134,15 @@ class MittenDaemon:
         )
 
         self._presence.start()
-        self._presence.set_state("idle")
+        self._set_presence("idle")
+        threading.Thread(target=self._gui_presence_loop, name="gui-presence", daemon=True).start()
 
         self._watcher.start()
 
         if self._config.general.mode != "game":
             try:
                 self._recorder.start()
-                self._presence.set_state("recording", name_override=self._recording_name())
+                self._set_presence("recording", name_override=self._recording_name())
             except RuntimeError as e:
                 log.error("%s", e)
                 print(f"\nError: {e}\n")
@@ -182,7 +189,7 @@ class MittenDaemon:
         if self._session_recorder.is_recording():
             # Stop — save the file through the normal post-process pipeline
             log.info("Session recording stopped by triple-click")
-            self._presence.set_state("recording" if self._recorder.is_running() else "idle", name_override=self._recording_name() if self._recorder.is_running() else None)
+            self._set_presence("recording" if self._recorder.is_running() else "idle", name_override=self._recording_name() if self._recorder.is_running() else None)
             sounds.session_stop()
             path = self._session_recorder.stop()
             if path:
@@ -204,7 +211,7 @@ class MittenDaemon:
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             out_path = TMP_DIR / f"session_{timestamp}.mp4"
             log.info("Session recording started by triple-click → %s", out_path)
-            self._presence.set_state("session")
+            self._set_presence("session")
             sounds.session_start()
             self._session_recorder.start(out_path)
             notify.notify(
@@ -239,7 +246,7 @@ class MittenDaemon:
 
         if self._recorder.save_replay():
             sounds.save_triggered()
-            self._presence.set_state("saving")
+            self._set_presence("saving")
             # 30-second watchdog: notify if no clip appears
             self._save_timer = threading.Timer(30.0, self._on_save_timeout)
             self._save_timer.start()
@@ -301,7 +308,7 @@ class MittenDaemon:
                     urgency="normal", icon="dialog-error", timeout_ms=5000,
                 )
 
-        self._presence.set_state("recording" if self._recorder.is_running() else "idle", name_override=self._recording_name() if self._recorder.is_running() else None)
+        self._set_presence("recording" if self._recorder.is_running() else "idle", name_override=self._recording_name() if self._recorder.is_running() else None)
 
         save.process_clip(
             raw_path=raw_path,
@@ -311,7 +318,7 @@ class MittenDaemon:
         )
 
     def _on_recorder_crash(self, reason: str) -> None:
-        self._presence.set_state("recorder_dead")
+        self._set_presence("recorder_dead")
         log.error("Recorder crash: %s", reason)
         # Write state file so GUI can show "recorder dead" in status banner
         try:
@@ -324,6 +331,46 @@ class MittenDaemon:
                 reason,
                 urgency="critical", icon="dialog-error", timeout_ms=8000,
             )
+
+    def _set_presence(self, state: str, state_override=None, detail_override=None, name_override=None) -> None:
+        """Update tracked daemon state and send to Discord (skips send if GUI is focused)."""
+        self._daemon_state = state
+        self._daemon_state_ov = state_override
+        self._daemon_detail_ov = detail_override
+        self._daemon_name_ov = name_override
+        if not GUI_PRESENCE_FILE.exists():
+            self._presence.set_state(state, state_override, detail_override, name_override)
+
+    def _gui_presence_loop(self) -> None:
+        """Background thread: watches for GUI presence file and forwards it to Discord."""
+        last_mtime: float | None = None
+        gui_was_active = False
+        while not self._shutdown.is_set():
+            try:
+                if GUI_PRESENCE_FILE.exists():
+                    mtime = GUI_PRESENCE_FILE.stat().st_mtime
+                    if mtime != last_mtime:
+                        last_mtime = mtime
+                        data = json.loads(GUI_PRESENCE_FILE.read_text())
+                        self._presence.set_state(
+                            "idle",
+                            state_override=data.get("state_override"),
+                            detail_override=data.get("detail_override"),
+                            name_override=data.get("name_override"),
+                        )
+                        gui_was_active = True
+                elif gui_was_active:
+                    gui_was_active = False
+                    last_mtime = None
+                    self._presence.set_state(
+                        self._daemon_state,
+                        self._daemon_state_ov,
+                        self._daemon_detail_ov,
+                        self._daemon_name_ov,
+                    )
+            except Exception as e:
+                log.debug("GUI presence watcher: %s", e)
+            self._shutdown.wait(2.0)
 
     def _recording_name(self) -> str | None:
         dc = self._config.discord
@@ -345,7 +392,7 @@ class MittenDaemon:
             detail = None
             state = None
             name = ("clipping with Mitten" if dc.show_mode_label else "Mitten") if dc.show_name else None
-        self._presence.set_state("game", state_override=state, detail_override=detail, name_override=name)
+        self._set_presence("game", state_override=state, detail_override=detail, name_override=name)
         log.info("Game started: %s", game.name)
         if self._config.notifications.enabled:
             notify.notify(
@@ -373,7 +420,7 @@ class MittenDaemon:
             )
 
     def _on_game_stop(self, game: GameInfo) -> None:
-        self._presence.set_state("idle")
+        self._set_presence("idle")
         log.info("Game stopped: %s", game.name)
         if self._config.notifications.enabled:
             notify.notify(
@@ -390,6 +437,7 @@ class MittenDaemon:
         # Clear stale state files from previous run
         PAUSE_FILE.unlink(missing_ok=True)
         RECORDER_DEAD_FILE.unlink(missing_ok=True)
+        GUI_PRESENCE_FILE.unlink(missing_ok=True)
 
     def _lock_pid_file(self) -> None:
         try:
@@ -452,7 +500,7 @@ class MittenDaemon:
             PAUSE_FILE.unlink(missing_ok=True)
             try:
                 self._recorder.start()
-                self._presence.set_state("recording", name_override=self._recording_name())
+                self._set_presence("recording", name_override=self._recording_name())
             except RuntimeError as e:
                 log.error("Failed to resume recorder: %s", e)
                 return
@@ -464,7 +512,7 @@ class MittenDaemon:
                 )
         else:
             log.info("Pausing recording (SIGUSR2)")
-            self._presence.set_state("paused")
+            self._set_presence("paused")
             self._recorder.stop()
             try:
                 PAUSE_FILE.touch()
@@ -497,14 +545,14 @@ class MittenDaemon:
             if not self._recorder.is_running():
                 try:
                     self._recorder.start()
-                    self._presence.set_state("recording", name_override=self._recording_name())
+                    self._set_presence("recording", name_override=self._recording_name())
                     log.info("Config reload: %s mode active, recorder started", new_mode)
                 except RuntimeError as e:
                     log.error("Recorder start after reload failed: %s", e)
 
         elif old_mode != "game" and new_mode == "game":
             self._recorder.stop()
-            self._presence.set_state("idle")
+            self._set_presence("idle")
             if new_cfg.game_detection.enabled and not self._detector:
                 from .detect import GameDetector
                 self._detector = GameDetector(
