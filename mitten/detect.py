@@ -210,17 +210,35 @@ def _detect_steam(pid: int) -> GameInfo | None:
     return GameInfo(name=game_name, pid=pid, detection_method="steam")
 
 
-def _steam_game_name(app_id: str, env: dict) -> str | None:
+def _steam_library_paths() -> list[Path]:
+    """Return all Steam library folders, including secondary ones from libraryfolders.vdf."""
     steam_root = Path.home() / ".local" / "share" / "Steam"
-    manifest = steam_root / "steamapps" / f"appmanifest_{app_id}.acf"
-    if not manifest.exists():
-        return None
+    paths = [steam_root / "steamapps"]
+    vdf = steam_root / "steamapps" / "libraryfolders.vdf"
     try:
-        content = manifest.read_text(errors="ignore")
-        m = re.search(r'"name"\s+"([^"]+)"', content)
-        return m.group(1) if m else None
-    except Exception:
-        return None
+        content = vdf.read_text(errors="ignore")
+        for m in re.finditer(r'"path"\s+"([^"]+)"', content):
+            extra = Path(m.group(1)) / "steamapps"
+            if extra not in paths:
+                paths.append(extra)
+    except OSError:
+        pass
+    return paths
+
+
+def _steam_game_name(app_id: str, env: dict) -> str | None:
+    for lib in _steam_library_paths():
+        manifest = lib / f"appmanifest_{app_id}.acf"
+        if not manifest.exists():
+            continue
+        try:
+            content = manifest.read_text(errors="ignore")
+            m = re.search(r'"name"\s+"([^"]+)"', content)
+            if m:
+                return m.group(1)
+        except OSError:
+            continue
+    return None
 
 
 def _detect_minecraft(pid: int) -> GameInfo | None:
