@@ -1709,6 +1709,7 @@ class SettingsDialog(QWidget):
 
             dlg = QDialog(self)
             dlg.setWindowTitle("switch modes?")
+            dlg.setStyleSheet(f"QDialog {{ background-color: {C.SURFACE}; color: {C.TEXT}; }}")
             lay = QVBoxLayout(dlg)
             lay.setContentsMargins(20, 20, 20, 20)
             lay.setSpacing(12)
@@ -1721,9 +1722,21 @@ class SettingsDialog(QWidget):
             lay.addWidget(lbl)
             btn_row = QHBoxLayout()
             btn_row.addStretch()
+            _btn_base = (
+                "QPushButton { padding: 6px 18px; border-radius: 6px; font-size: 13px; }"
+            )
             btn_no = QPushButton("no, keep current")
+            btn_no.setStyleSheet(
+                _btn_base +
+                f"QPushButton {{ background-color: {C.OVERLAY}; color: {C.TEXT}; border: none; }}"
+                f"QPushButton:hover {{ background-color: {C.BORDER}; }}"
+            )
             btn_yes = QPushButton("yes, switch")
-            btn_yes.setProperty("class", "danger")
+            btn_yes.setStyleSheet(
+                _btn_base +
+                f"QPushButton {{ background-color: {C.PINK}; color: {C.BG}; border: none; font-weight: bold; }}"
+                f"QPushButton:hover {{ background-color: #e07090; }}"
+            )
             btn_no.clicked.connect(dlg.reject)
             btn_yes.clicked.connect(dlg.accept)
             btn_row.addWidget(btn_no)
