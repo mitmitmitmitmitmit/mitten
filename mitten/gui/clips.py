@@ -489,6 +489,8 @@ class ClipBrowser(QWidget):
 
     # Emitted whenever the clips page cat state changes — main window syncs logo
     cat_state_changed = pyqtSignal(str)
+    # Emitted when a clip is selected: (path, duration_seconds)
+    clip_selected = pyqtSignal(object, int)
 
     # Vibe cycle: cat states to cycle through while a clip is playing
     _VIBE_CYCLE = ["vibe_1", "vibe_2", "vibe_3", "vibe_2", "vibe_1"]
@@ -711,7 +713,16 @@ class ClipBrowser(QWidget):
     def _on_select(self, index) -> None:
         row = index.row()
         if 0 <= row < len(self._clip_paths):
-            self._player.load_clip(self._clip_paths[row])
+            path = self._clip_paths[row]
+            self._player.load_clip(path)
+            dur_item = self._table.item(row, 2)
+            dur = 0
+            if dur_item:
+                try:
+                    dur = int(dur_item.text().replace("s", "").replace("?", "0") or 0)
+                except ValueError:
+                    pass
+            self.clip_selected.emit(path, dur)
 
     def _on_double_click(self, index) -> None:
         row = index.row()

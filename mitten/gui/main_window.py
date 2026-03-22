@@ -1862,6 +1862,8 @@ class MittenMainWindow(QMainWindow):
 
         self._gui_cat_state: str = "sleepy"
         self._gui_settings_idx: int = 0
+        self._gui_clip_path: object = None
+        self._gui_clip_dur: int = 0
 
         try:
             from .system_setup import check_dependencies
@@ -2181,6 +2183,11 @@ class MittenMainWindow(QMainWindow):
         self._gui_cat_state = state
         self._mark_gui_presence_dirty()
 
+    def _on_clip_selected(self, path, dur: int) -> None:
+        self._gui_clip_path = path
+        self._gui_clip_dur = dur
+        self._mark_gui_presence_dirty()
+
     def _on_settings_section_look(self, direction: str) -> None:
         """Cat glances when switching settings sections, then settles back to settings cat."""
         try:
@@ -2253,11 +2260,26 @@ class MittenMainWindow(QMainWindow):
 
         elif page == 1:  # Clips
             cat_state = self._gui_cat_state
+            # Build clip detail suffix from path + duration
+            clip_suffix = ""
+            try:
+                if self._gui_clip_path is not None:
+                    from pathlib import Path as _Path
+                    from datetime import datetime as _dt
+                    p = _Path(str(self._gui_clip_path))
+                    stem = p.stem.replace("mitten_", "").replace("session_", "")
+                    d = _dt.strptime(stem, "%Y-%m-%d_%H-%M-%S")
+                    today = _dt.now().date()
+                    date_str = "today" if d.date() == today else d.strftime("%b %-d")
+                    dur_str = f"{self._gui_clip_dur}s" if self._gui_clip_dur else ""
+                    clip_suffix = f" · {date_str}" + (f" · {dur_str}" if dur_str else "")
+            except Exception:
+                pass
             if cat_state in ("vibe_1", "vibe_2", "vibe_3"):
                 vibe_cat = get_state_cat(cat_state) if dc.animated_ascii else DARK_CAT_VIBE_1
-                return "watching a clip", f"{vibe_cat}  watching a clip", "watching a clip with Mitten"
+                return f"watching a clip{clip_suffix}", f"{vibe_cat}  watching a clip{clip_suffix}", "watching a clip with Mitten"
             elif cat_state == "startled":
-                return "watching a clip", f"{DARK_CAT_STARTLED}  a clip just dropped", "watching a clip with Mitten"
+                return f"watching a clip{clip_suffix}", f"{DARK_CAT_STARTLED}  a clip just dropped{clip_suffix}", "watching a clip with Mitten"
             else:
                 return "browsing clips", f"{DARK_CAT_SLEEPY}  browsing clips", "customizing Mitten"
 
@@ -2324,6 +2346,7 @@ class MittenMainWindow(QMainWindow):
         self._nav_back.clicked.connect(self._exit_settings)
 
         self._clips_page.cat_state_changed.connect(self._on_clip_cat_state)
+        self._clips_page.clip_selected.connect(self._on_clip_selected)
 
         for i, btn in enumerate(self._settings_nav_buttons):
             btn.clicked.connect(lambda _, idx=i: self._switch_settings_section(idx))
