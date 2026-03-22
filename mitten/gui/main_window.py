@@ -2256,7 +2256,7 @@ class MittenMainWindow(QMainWindow):
                     "idle",
                     state_override="light mode loving FREAK",
                     detail_override=detail,
-                    name_override="mitten (L)",
+                    name_override="Mitten (L)",
                 )
                 return
 
@@ -2285,33 +2285,33 @@ class MittenMainWindow(QMainWindow):
 
         if page == 0:  # Dashboard
             cat = get_state_cat(self._state) if dc.animated_ascii else DARK_CAT_IDLE
-            return "on the dashboard", f"{cat}  on the dashboard", "customizing mitten"
+            return "on the dashboard", f"{cat}  on the dashboard", "customizing Mitten"
 
         elif page == 1:  # Clips
             cat_state = self._gui_cat_state
             if cat_state in ("vibe_1", "vibe_2", "vibe_3"):
                 vibe_cat = get_state_cat(cat_state) if dc.animated_ascii else DARK_CAT_VIBE_1
-                return "watching a clip", f"{vibe_cat}  watching a clip", "watching a clip with mitten"
+                return "watching a clip", f"{vibe_cat}  watching a clip", "watching a clip with Mitten"
             elif cat_state == "startled":
-                return "watching a clip", f"{DARK_CAT_STARTLED}  a clip just dropped", "watching a clip with mitten"
+                return "watching a clip", f"{DARK_CAT_STARTLED}  a clip just dropped", "watching a clip with Mitten"
             else:
-                return "browsing clips", f"{DARK_CAT_SLEEPY}  browsing clips", "customizing mitten"
+                return "browsing clips", f"{DARK_CAT_SLEEPY}  browsing clips", "customizing Mitten"
 
         elif page == 2:  # Settings
             _sections = ["general", "recording", "compression", "watermark", "games", "discord"]
             section = _sections[self._gui_settings_idx] if self._gui_settings_idx < len(_sections) else "settings"
             cat = _cat("settings")
-            return f"in settings \u2014 {section}", f"{cat}  tweaking settings", "customizing mitten"
+            return f"in settings \u2014 {section}", f"{cat}  tweaking settings", "customizing Mitten"
 
         elif page == 3:  # About
             cat = _cat("about")
-            return "about", f"{cat}  reading about mitten", "customizing mitten"
+            return "about", f"{cat}  reading about Mitten", "customizing Mitten"
 
         elif page == 4:  # Debug
             cat = _cat("debug")
-            return "debug mode", f"{cat}  in debug mode", "customizing mitten"
+            return "debug mode", f"{cat}  in debug mode", "customizing Mitten"
 
-        return "in mitten", f"{DARK_CAT_IDLE}  in mitten", "customizing mitten"
+        return "in Mitten", f"{DARK_CAT_IDLE}  in Mitten", "customizing Mitten"
 
     def _show_light_mode_discord_block(self) -> None:
         try:

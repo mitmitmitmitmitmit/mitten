@@ -33,7 +33,7 @@ _CLIENT_ID = "1484018158300823643"
 # "state" is the small lower line; "details" is the upper/main line.
 _PRESENCE_STATES: dict[str, tuple[str, str]] = {
     "idle":          ("idle",              "~( ^.x.^)>  waiting for something good"),
-    "recording":     ("recording",         "~( ^.x.^)>  mitten is watching\u2026"),
+    "recording":     ("recording",         "~( ^.x.^)>  Mitten is watching\u2026"),
     "game":          ("game mode",         "(=ʘωʘ=)✨  recording gameplay"),
     "saving":        ("saving clip",       "~( ^.x.^)> \u266a  caught one!"),
     "paused":        ("paused",            "~( ^.-.-)>  buffer paused"),

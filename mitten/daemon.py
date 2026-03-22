@@ -330,19 +330,19 @@ class MittenDaemon:
         if not dc.show_name:
             return None
         if not dc.show_mode_label:
-            return "mitten"
+            return "Mitten"
         if self._config.general.mode == "window":
-            return "window with mitten"
-        return "desktop with mitten"
+            return "window with Mitten"
+        return "desktop with Mitten"
 
     def _on_game_start(self, game: GameInfo) -> None:
         dc = self._config.discord
         if dc.show_game_name:
-            detail = game.name
-            name = f"{game.name} with mitten" if dc.show_name else None
+            detail = f"(=\u0298\u03c9\u0298=)\u2728  Mitten is watching {game.name}"
+            name = f"{game.name} with Mitten" if dc.show_name else None
         else:
-            detail = None
-            name = ("clipping with mitten" if dc.show_mode_label else "mitten") if dc.show_name else None
+            detail = None  # falls back to preset "(=ʘωʘ=)✨  recording gameplay"
+            name = ("clipping with Mitten" if dc.show_mode_label else "Mitten") if dc.show_name else None
         self._presence.set_state("game", detail_override=detail, name_override=name)
         log.info("Game started: %s", game.name)
         if self._config.notifications.enabled:
