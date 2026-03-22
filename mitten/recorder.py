@@ -158,9 +158,9 @@ class GpuRecorder:
         ]
         audio = cfg.recorder.audio_device
         if audio == "default":
-            audio = "default_output"  # gpu-screen-recorder token for system audio
+            audio = "default_output"
         if audio:
-            cmd += ["-a", audio]
+            cmd += ["-a", audio.split("|")[0]]
         return cmd
 
     def _launch(self) -> None:
@@ -290,7 +290,7 @@ class SessionRecorder:
                 "-o", str(output_path),
             ]
             if audio:
-                cmd += ["-a", audio]
+                cmd += ["-a", audio.split("|")[0]]
 
             self._output_path = output_path
             log.info("Starting session recorder: %s", " ".join(cmd))
