@@ -34,14 +34,17 @@ class TriggerListener:
         config: MittenConfig,
         on_trigger: Callable[[], None],
         on_error: Callable[[str], None] | None = None,
+        on_triple_trigger: Callable[[], None] | None = None,
     ) -> None:
         self._button_code: int = button_name_to_code(config.trigger.button)
         self._cooldown: float = config.trigger.cooldown
         self._on_trigger = on_trigger
         self._on_error = on_error
+        self._on_triple_trigger = on_triple_trigger
         self._thread: threading.Thread | None = None
         self._shutdown = threading.Event()
         self._last_trigger: float = 0.0
+        self._click_times: list[float] = []  # for triple-click detection
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -146,6 +149,23 @@ class TriggerListener:
 
     def _fire(self) -> None:
         now = time.monotonic()
+
+        # Record every press for triple-click detection (bypass cooldown for counting)
+        self._click_times.append(now)
+        self._click_times = [t for t in self._click_times if now - t <= 0.6]
+
+        # Triple-click: 3 presses within 600ms
+        if len(self._click_times) >= 3 and self._on_triple_trigger:
+            log.info("Triple-click detected — toggling session recording")
+            self._click_times.clear()
+            self._last_trigger = now  # reset cooldown
+            try:
+                self._on_triple_trigger()
+            except Exception as e:
+                log.error("on_triple_trigger callback raised: %s", e)
+            return
+
+        # Normal single-click with cooldown
         if now - self._last_trigger < self._cooldown:
             log.debug("Trigger ignored (cooldown)")
             return

@@ -1,0 +1,23 @@
+# Normalize line endings: always LF in repo, LF on checkout
+* text=auto eol=lf
+
+# Python files — always LF
+*.py text eol=lf
+
+# Config / data files — always LF
+*.toml text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
+*.ini  text eol=lf
+*.cfg  text eol=lf
+*.service text eol=lf
+*.desktop text eol=lf
+*.sh   text eol=lf
+
+# Binary files — no line ending conversion
+*.png  binary
+*.jpg  binary
+*.mp4  binary
+*.tar  binary
+*.gz   binary

@@ -40,12 +40,23 @@ _RUNTIME_DEPS: dict[str, str] = {
 }
 
 
+def check_evdev() -> bool:
+    """Return True if python-evdev is importable (required for mouse button trigger)."""
+    try:
+        import evdev  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def check_dependencies() -> dict[str, bool]:
     """
     Return a dict mapping binary name → True if found on PATH.
     Read-only — does not attempt to install anything.
     """
-    return {name: (shutil.which(name) is not None) for name in _RUNTIME_DEPS}
+    result = {name: (shutil.which(name) is not None) for name in _RUNTIME_DEPS}
+    result["python-evdev"] = check_evdev()
+    return result
 
 
 # ------------------------------------------------------------------ #

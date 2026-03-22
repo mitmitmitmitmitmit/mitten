@@ -8,7 +8,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QLocale, QThread, Qt, QUrl, pyqtSignal
+from PyQt6.QtCore import QThread, QTimer, Qt, QUrl, pyqtSignal, QObject
 from PyQt6.QtGui import QAction, QDesktopServices
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSlider,
     QSplitter,
     QTableWidget,
@@ -28,7 +29,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .resources import C, CAT, CAT_FONT, CATS
+from .resources import C, CAT, CAT_FONT, CATS, _accent_hover, _hex_rgba
 
 
 # ------------------------------------------------------------------ #
@@ -61,11 +62,39 @@ class _DurationProber(QThread):
 
 
 # ------------------------------------------------------------------ #
+# Trim worker (background thread)
+# ------------------------------------------------------------------ #
+
+class _TrimWorker(QThread):
+    """Run ffmpeg trim in a background thread."""
+    done = pyqtSignal(bool, str)  # (success, message)
+
+    def __init__(self, cmd: list[str], out_path: Path, parent=None) -> None:
+        super().__init__(parent)
+        self._cmd = cmd
+        self._out_path = out_path
+
+    def run(self) -> None:
+        try:
+            result = subprocess.run(self._cmd, capture_output=True, timeout=60)
+            if result.returncode == 0 and self._out_path.exists():
+                size = self._out_path.stat().st_size / (1024 * 1024)
+                self.done.emit(True, f"{self._out_path.name}  ({size:.1f} MB)")
+            else:
+                self.done.emit(False, "ffmpeg returned an error.")
+        except Exception as e:
+            self.done.emit(False, str(e))
+
+
+# ------------------------------------------------------------------ #
 # Video player panel
 # ------------------------------------------------------------------ #
 
 class _PlayerPanel(QWidget):
     """Video player with play/pause, seek, and trim controls."""
+
+    clip_started = pyqtSignal()   # clip begins playing (new load or resume)
+    clip_paused  = pyqtSignal()   # clip paused or unloaded
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -75,6 +104,9 @@ class _PlayerPanel(QWidget):
         self._slider_dragging = False
         self._audio_proc: subprocess.Popen | None = None
         self._muted = False
+        self._lag_timer = QTimer(self)
+        self._lag_timer.setSingleShot(True)
+        self._lag_timer.timeout.connect(self._do_light_mode_lag)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -83,7 +115,7 @@ class _PlayerPanel(QWidget):
         # Video area — QGridLayout so the mute button can float over the video
         self._video_area = QWidget()
         self._video_area.setMinimumHeight(200)
-        self._video_area.setStyleSheet("background-color: #0d0b14; border-radius: 6px 6px 0 0;")
+        self._video_area.setStyleSheet(f"background-color: {C.BG}; border-radius: 6px 6px 0 0;")
         vid_grid = QGridLayout(self._video_area)
         vid_grid.setContentsMargins(0, 0, 0, 0)
         vid_grid.setSpacing(0)
@@ -93,7 +125,7 @@ class _PlayerPanel(QWidget):
             from PyQt6.QtMultimediaWidgets import QVideoWidget
 
             self._video_widget = QVideoWidget()
-            self._video_widget.setStyleSheet("background: #0d0b14;")
+            self._video_widget.setStyleSheet(f"background: {C.BG};")
             self._video_widget.setAspectRatioMode(
                 Qt.AspectRatioMode.KeepAspectRatioByExpanding
             )
@@ -115,10 +147,15 @@ class _PlayerPanel(QWidget):
         empty_layout = QVBoxLayout(self._empty)
         empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_layout.setSpacing(6)
-        empty_cat = QLabel("( ´ω` )")
-        empty_cat.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_cat.setStyleSheet(
-            f"color: {C.LAVENDER}; font-size: 32px; font-weight: 700; {CAT_FONT}"
+        try:
+            from .themes import DARK_CAT_SLEEPY
+            _empty_cat_text = DARK_CAT_SLEEPY
+        except Exception:
+            _empty_cat_text = "~( -.x.-)> zzz"
+        self._empty_cat_lbl = QLabel(_empty_cat_text)
+        self._empty_cat_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_cat_lbl.setStyleSheet(
+            f"color: {C.LAVENDER}; font-size: 28px; font-weight: 700; {CAT_FONT}"
             f"background: transparent; border: none;"
         )
         empty_primary = QLabel("select a clip to preview")
@@ -131,7 +168,7 @@ class _PlayerPanel(QWidget):
         empty_hint.setStyleSheet(
             f"color: {C.SUBTEXT}; font-size: 11px; background: transparent; border: none;"
         )
-        empty_layout.addWidget(empty_cat)
+        empty_layout.addWidget(self._empty_cat_lbl)
         empty_layout.addWidget(empty_primary)
         empty_layout.addWidget(empty_hint)
         vid_grid.addWidget(self._empty, 0, 0)
@@ -141,7 +178,7 @@ class _PlayerPanel(QWidget):
         # Controls bar
         self._controls = QFrame()
         self._controls.setStyleSheet(
-            f"QFrame {{ background-color: rgba(37,35,54,0.6);"
+            f"QFrame {{ background-color: {_hex_rgba(C.SURFACE, 0.6)};"
             f"border-radius: 0 0 6px 6px; }}"
         )
         ctrl_layout = QVBoxLayout(self._controls)
@@ -168,7 +205,6 @@ class _PlayerPanel(QWidget):
         btn_row.addWidget(self._btn_play)
 
         self._btn_mute = QPushButton("Mute")
-        self._btn_mute.setFixedWidth(60)
         self._btn_mute.setProperty("class", "secondary")
         self._btn_mute.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_mute.setToolTip("Mute / unmute")
@@ -183,7 +219,7 @@ class _PlayerPanel(QWidget):
 
         self._btn_open = QPushButton("Open External")
         self._btn_open.setProperty("class", "secondary")
-        self._btn_open.setFixedWidth(120)
+        self._btn_open.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self._btn_open.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_open.clicked.connect(self._open_external)
         btn_row.addWidget(self._btn_open)
@@ -225,7 +261,7 @@ class _PlayerPanel(QWidget):
             f"QPushButton {{ background-color: {C.LAVENDER}; color: {C.BG};"
             f"border: none; border-radius: 6px; padding: 6px 14px;"
             f"font-weight: 700; font-size: 12px; }}"
-            f"QPushButton:hover {{ background-color: #d4bff7; }}"
+            f"QPushButton:hover {{ background-color: {_accent_hover()}; }}"
         )
         self._btn_trim.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_trim.clicked.connect(self._save_trim)
@@ -255,6 +291,7 @@ class _PlayerPanel(QWidget):
             self._media_player.setSource(QUrl.fromLocalFile(str(path)))
             self._media_player.play()
         self._btn_play.setText("Pause")
+        self.clip_started.emit()
 
     def play(self) -> None:
         if self._clip_path:
@@ -263,6 +300,9 @@ class _PlayerPanel(QWidget):
         if self._media_player:
             self._media_player.play()
         self._btn_play.setText("Pause")
+        self.clip_started.emit()
+        # Light mode: randomly schedule fake lag events during playback
+        self._schedule_light_mode_lag()
 
     def _start_audio(self, path: Path, pos_sec: float) -> None:
         self._stop_audio()
@@ -280,6 +320,9 @@ class _PlayerPanel(QWidget):
         if self._audio_proc and self._audio_proc.poll() is None:
             self._audio_proc.terminate()
         self._audio_proc = None
+
+    def __del__(self) -> None:
+        self._stop_audio()
 
     def _toggle_mute(self) -> None:
         self._muted = not self._muted
@@ -300,12 +343,47 @@ class _PlayerPanel(QWidget):
             self._stop_audio()
             self._media_player.pause()
             self._btn_play.setText("Play")
+            self.clip_paused.emit()
         else:
             pos = self._media_player.position() / 1000.0
             if self._clip_path:
                 self._start_audio(self._clip_path, pos)
             self._media_player.play()
             self._btn_play.setText("Pause")
+            self.clip_started.emit()
+
+    def _schedule_light_mode_lag(self) -> None:
+        """In light mode, randomly schedule a fake freeze during playback."""
+        try:
+            from . import themes as _t
+            if not _t.LIGHT_MODE_ACTIVE:
+                return
+        except Exception:
+            return
+        if random.random() > 0.55:  # ~55% chance of lag per playback session
+            return
+        delay_ms = random.randint(4_000, 18_000)  # freeze somewhere 4-18s in
+        self._lag_timer.start(delay_ms)
+
+    def _do_light_mode_lag(self) -> None:
+        """Freeze the player for 0.4-1.2s, then resume — simulates buffering."""
+        if not self._media_player:
+            return
+        from PyQt6.QtMultimedia import QMediaPlayer
+        if self._media_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+            return
+        self._media_player.pause()
+        freeze_ms = random.randint(400, 1200)
+        QTimer.singleShot(freeze_ms, self._resume_after_lag)
+
+    def _resume_after_lag(self) -> None:
+        if not self._media_player:
+            return
+        from PyQt6.QtMultimedia import QMediaPlayer
+        if self._media_player.playbackState() == QMediaPlayer.PlaybackState.PausedState:
+            self._media_player.play()
+            # Maybe lag again
+            self._schedule_light_mode_lag()
 
     def _on_slider_pressed(self) -> None:
         self._slider_dragging = True
@@ -360,7 +438,6 @@ class _PlayerPanel(QWidget):
             self._clip_path.stem + "_trimmed" + self._clip_path.suffix
         )
 
-        # TODO (Sonnet): run in background QThread with progress indicator
         cmd = [
             "ffmpeg", "-y",
             "-i", str(self._clip_path),
@@ -370,22 +447,32 @@ class _PlayerPanel(QWidget):
             "-movflags", "+faststart",
             str(out),
         ]
-        try:
-            result = subprocess.run(cmd, capture_output=True, timeout=30)
-            if result.returncode == 0:
-                size = out.stat().st_size / (1024 * 1024)
-                QMessageBox.information(
-                    self, CAT,
-                    f"Trimmed clip saved!\n{out.name}  ({size:.1f} MB)",
-                )
-            else:
-                QMessageBox.warning(self, "Trim Failed", "ffmpeg returned an error.")
-        except Exception as e:
-            QMessageBox.warning(self, "Trim Failed", str(e))
+
+        self._btn_trim.setEnabled(False)
+        self._btn_trim.setText("trimming…")
+        self._trim_worker = _TrimWorker(cmd, out, self)
+        self._trim_worker.done.connect(self._on_trim_done)
+        self._trim_worker.start()
+
+    def _on_trim_done(self, success: bool, msg: str) -> None:
+        self._btn_trim.setEnabled(True)
+        self._btn_trim.setText("Save Trim")
+        if success:
+            QMessageBox.information(self, CAT, f"Trimmed clip saved!\n{msg}")
+        else:
+            QMessageBox.warning(self, "Trim Failed", msg)
 
     def _open_external(self) -> None:
         if self._clip_path:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._clip_path)))
+
+    def closeEvent(self, event) -> None:
+        self._stop_audio()
+        worker = getattr(self, "_trim_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.quit()
+            worker.wait(3000)
+        super().closeEvent(event)
 
     @staticmethod
     def _fmt(ms: int) -> str:
@@ -400,15 +487,32 @@ class _PlayerPanel(QWidget):
 class ClipBrowser(QWidget):
     """Split view: clip table + player/trimmer."""
 
-    _LOCALE = QLocale.system()
+    # Emitted whenever the clips page cat state changes — main window syncs logo
+    cat_state_changed = pyqtSignal(str)
+
+    # Vibe cycle: cat states to cycle through while a clip is playing
+    _VIBE_CYCLE = ["vibe_1", "vibe_2", "vibe_3", "vibe_2", "vibe_1"]
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setStyleSheet(f"background-color: {C.BG};")
         self._prober: _DurationProber | None = None
         self._clip_paths: list[Path] = []
+        self._cat_state = "sleepy"      # current cat state for this page
+        self._vibe_idx = 0
+        self._is_vibing = False
+
+        # Vibe timer — advances the vibe cycle while a clip plays
+        self._vibe_timer = QTimer(self)
+        self._vibe_timer.setInterval(750)  # ~80 BPM — close enough to feel musical
+        self._vibe_timer.timeout.connect(self._vibe_tick)
+
         self._build_ui()
         self._refresh()
+
+        # Wire player signals after _build_ui creates self._player
+        self._player.clip_started.connect(self._on_clip_started)
+        self._player.clip_paused.connect(self._on_clip_paused)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -442,10 +546,11 @@ class ClipBrowser(QWidget):
             f"color: {C.LAVENDER}; font-size: 28px; font-weight: 700; {CAT_FONT}"
         )
         el.addWidget(cat_lbl)
-        no_clips = QLabel("no clips yet — press Save or middle-click the tray icon")
-        no_clips.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        no_clips.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 12px;")
-        el.addWidget(no_clips)
+        self._empty_hint_label = QLabel("start recording first, then save a clip to see it here")
+        self._empty_hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_hint_label.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 12px;")
+        self._empty_hint_label.setWordWrap(True)
+        el.addWidget(self._empty_hint_label)
         root.addWidget(self._empty)
 
         # Splitter: table | player
@@ -511,12 +616,23 @@ class ClipBrowser(QWidget):
             self._empty.show()
             self._splitter.hide()
             self._status.setText("")
-            self._title.setText(f"{CAT}  no clips yet")
+            # Light mode: replace empty state hint text with abuse
+            try:
+                from .themes import LIGHT_MODE_ACTIVE, get_abuse
+                if LIGHT_MODE_ACTIVE:
+                    self._empty_hint_label.setText(get_abuse(include_name=False))
+                else:
+                    self._empty_hint_label.setText("start recording first, then save a clip to see it here")
+            except Exception:
+                pass
+            # Update title with current cat state (don't emit — just visual update)
+            self._emit_cat(self._cat_state)
             return
 
         self._empty.hide()
         self._splitter.show()
-        self._title.setText(f"{CAT}  {len(clips)} clips")
+        # Update title with current cat state
+        self._emit_cat(self._cat_state)
 
         self._table.setRowCount(len(clips))
         probe_jobs: list[tuple[int, Path]] = []
@@ -554,6 +670,7 @@ class ClipBrowser(QWidget):
 
         if self._prober and self._prober.isRunning():
             self._prober.terminate()
+            self._prober.wait(2000)
 
         self._prober = _DurationProber(probe_jobs, self)
         self._prober.duration_ready.connect(self._on_duration)
@@ -580,10 +697,7 @@ class ClipBrowser(QWidget):
             stem = filename.replace("mitten_", "").replace(".mp4", "")
             dt = datetime.strptime(stem, "%Y-%m-%d_%H-%M-%S")
             today = datetime.now().date()
-            # Use system locale for time formatting
-            time_str = self._LOCALE.toString(
-                dt.time().hour * 100 + dt.time().minute, "hhmm"
-            ) if False else dt.strftime("%-I:%M %p")
+            time_str = dt.strftime("%-I:%M %p")
             if dt.date() == today:
                 return f"Today {time_str}"
             if (today - dt.date()).days == 1:
@@ -649,14 +763,65 @@ class ClipBrowser(QWidget):
                 pass
             self._refresh()
 
+    # ── Cat vibe system ──
+
+    def _emit_cat(self, state: str) -> None:
+        """Update title label + emit signal so sidebar syncs."""
+        self._cat_state = state
+        try:
+            from .themes import get_state_cat, LIGHT_MODE_ACTIVE, get_light_mode_cat
+            cat = get_state_cat(state) if not LIGHT_MODE_ACTIVE else get_light_mode_cat()
+        except Exception:
+            cat = "~( ^.x.^)>"
+        count = len(self._clip_paths)
+        if count == 0:
+            self._title.setText(f"{cat}  no clips yet")
+        else:
+            self._title.setText(f"{cat}  {count} clips")
+        self.cat_state_changed.emit(state)
+
+    def _on_clip_started(self) -> None:
+        """Clip started playing — run startled → settle → vibe sequence."""
+        self._vibe_timer.stop()
+        self._is_vibing = False
+        self._emit_cat("startled")
+        # After brief startle, start settling into a vibe
+        QTimer.singleShot(350, lambda: self._emit_cat("vibe_1"))
+        QTimer.singleShot(700, self._start_vibe)
+
+    def _start_vibe(self) -> None:
+        self._vibe_idx = 1  # start at index 1 (vibe_2) since we already showed vibe_1
+        self._is_vibing = True
+        self._vibe_timer.start()
+
+    def _vibe_tick(self) -> None:
+        self._vibe_idx = (self._vibe_idx + 1) % len(self._VIBE_CYCLE)
+        self._emit_cat(self._VIBE_CYCLE[self._vibe_idx])
+
+    def _on_clip_paused(self) -> None:
+        """Clip paused — settle back to sleepy."""
+        self._vibe_timer.stop()
+        self._is_vibing = False
+        self._emit_cat("sleepy")
+
+    # ── Lifecycle ──
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._refresh()
+        # Start sleepy when page opens (if not already vibing)
+        if not self._is_vibing:
+            self._emit_cat("sleepy")
 
     def hideEvent(self, event) -> None:
         super().hideEvent(event)
         self._player._stop_audio()
+        self._vibe_timer.stop()
+        self._is_vibing = False
+        # Signal idle so sidebar restores to app state
+        self.cat_state_changed.emit("idle")
 
     def closeEvent(self, event) -> None:
         self._player._stop_audio()
+        self._vibe_timer.stop()
         super().closeEvent(event)

@@ -2,6 +2,7 @@
 MITTEN CLI — GUI-first entry point.
 
   mitten          → first-run install if needed, then launch GUI
+  mitten restart  → reinstall, restart daemon, relaunch GUI
   mitten run      → start daemon (hidden; used by systemd ExecStart only)
   mitten _update  → auto-update UI (hidden; spawned by updater in konsole)
 """
@@ -62,13 +63,103 @@ def cmd_run(args: argparse.Namespace) -> None:
     MittenDaemon(cfg, verbose=args.verbose).run()
 
 
+def cmd_restart(args: argparse.Namespace) -> None:
+    """Stop everything, reinstall from repo, restart service, relaunch GUI."""
+    import os
+    import subprocess
+
+    from .updater import get_repo_dir
+
+    repo_dir = get_repo_dir()
+    current_pid = os.getpid()
+
+    print("\n  ~( ^.x.^)>  mitten restart\n")
+
+    # 1. Kill any running GUI / bare daemon processes (not us, not systemd-managed)
+    print("  [1] killing mitten processes...")
+    try:
+        import psutil
+        for proc in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                if proc.pid == current_pid:
+                    continue
+                cmdline = " ".join(proc.cmdline())
+                if "mitten" in cmdline and "restart" not in cmdline:
+                    proc.terminate()
+            except Exception:
+                pass
+    except ImportError:
+        import logging as _log
+        _log.getLogger(__name__).warning("psutil not available, using pkill fallback")
+        subprocess.run(
+            ["pkill", "-f", "mitten run"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    print("      \u2713")
+
+    # 2. Stop systemd service
+    print("  [2] stopping mitten.service...")
+    subprocess.run(
+        ["systemctl", "--user", "stop", "mitten.service"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    print("      \u2713")
+
+    # 3. Fetch + reset + reinstall (mirrors auto-updater; skip git steps in dev)
+    if repo_dir:
+        is_prod = repo_dir.name == "Mitten"
+        print(f"  [3] reinstalling from {repo_dir.name}...")
+        ok = True
+        if is_prod:
+            from .updater import GITHUB_URL
+            r = subprocess.run(
+                ["git", "fetch", GITHUB_URL, "main"],
+                cwd=repo_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            if r.returncode == 0:
+                subprocess.run(
+                    ["git", "reset", "--hard", "FETCH_HEAD"],
+                    cwd=repo_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            else:
+                print("      ! git fetch failed — installing from current state")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-e", ".",
+             "--break-system-packages", "-q"],
+            cwd=repo_dir,
+        )
+        ok = result.returncode == 0
+        print(f"      {'✓' if ok else '✗  pip install failed'}")
+    else:
+        print("  [3] skipping reinstall — not in a git repo")
+
+    # 4. Start service
+    print("  [4] starting mitten.service...")
+    subprocess.run(
+        ["systemctl", "--user", "start", "mitten.service"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    print("      \u2713")
+
+    # 5. Launch GUI detached
+    print("  [5] launching GUI...")
+    subprocess.Popen(
+        ["mitten"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    print("      \u2713\n")
+    print("  done.\n")
+
+
 def cmd_update(args: argparse.Namespace) -> None:
     """Hidden subcommand: runs the update UI inside a konsole window."""
     from .updater import run_update_ui
     run_update_ui(args.from_hash, args.to_hash)
 
 
-def _launch_gui() -> None:
+def _launch_gui(abuse_reveal: bool = False) -> None:
     try:
         from .gui import launch_gui
     except ImportError:
@@ -78,7 +169,7 @@ def _launch_gui() -> None:
             "         or: pip install PyQt6>=6.5"
         )
         sys.exit(1)
-    launch_gui()
+    launch_gui(abuse_reveal=abuse_reveal)
 
 
 def main() -> None:
@@ -87,6 +178,9 @@ def main() -> None:
         description="MITTEN — replay buffer screen recorder",
     )
     sub = parser.add_subparsers(dest="command")
+
+    # User-facing
+    sub.add_parser("restart", help="reinstall, restart daemon, relaunch GUI")
 
     # Hidden — only used by systemd service ExecStart
     p_run = sub.add_parser("run", help=argparse.SUPPRESS)
@@ -100,7 +194,15 @@ def main() -> None:
     p_update.add_argument("--from", dest="from_hash", required=True)
     p_update.add_argument("--to", dest="to_hash", required=True)
 
+    # Hidden flag used by the anti-disable gauntlet in settings.py
+    parser.add_argument("--_abuse-reveal", dest="abuse_reveal", action="store_true",
+                        help=argparse.SUPPRESS)
+
     args = parser.parse_args()
+
+    if args.command == "restart":
+        cmd_restart(args)
+        return
 
     if args.command == "run":
         cmd_run(args)
@@ -116,4 +218,4 @@ def main() -> None:
         from .setup_wizard import run_wizard
         run_wizard()
 
-    _launch_gui()
+    _launch_gui(abuse_reveal=getattr(args, "abuse_reveal", False))

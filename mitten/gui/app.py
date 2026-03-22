@@ -12,7 +12,7 @@ import sys
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
-from .resources import STYLESHEET
+from .resources import make_stylesheet
 from ..config import GUI_SOCKET
 
 
@@ -76,13 +76,13 @@ def _check_wayland() -> None:
         pass
 
 
-def run_app() -> None:
+def run_app(abuse_reveal: bool = False) -> None:
     """Launch the MITTEN GUI — main window + system tray."""
     _check_wayland()
 
     if _is_already_running():
         app = QApplication(sys.argv)
-        app.setStyleSheet(STYLESHEET)
+        app.setStyleSheet(make_stylesheet())
         QMessageBox.information(
             None,
             "~( ^.x.^)>  MITTEN",
@@ -92,9 +92,18 @@ def run_app() -> None:
 
     app = QApplication(sys.argv)
     app.setApplicationName("MITTEN")
-    app.setApplicationDisplayName("~( ^.x.^)>  MITTEN")
+    app.setApplicationDisplayName("mitten")
     app.setQuitOnLastWindowClosed(False)
-    app.setStyleSheet(STYLESHEET)
+
+    # Apply theme before any widgets are created
+    try:
+        from ..config import load_config
+        from .themes import apply_theme
+        apply_theme(load_config().general.theme)
+    except Exception:
+        pass
+
+    app.setStyleSheet(make_stylesheet())
 
     # Single-instance lock
     lock = _create_lock()
@@ -110,10 +119,18 @@ def run_app() -> None:
     signal.signal(signal.SIGINT, _quit_handler)
     signal.signal(signal.SIGTERM, _quit_handler)
 
-    # Create main window (the primary interface)
+    # Create main window — starts minimized; tray click or app launcher raises it
     from .main_window import MittenMainWindow
     window = MittenMainWindow()
-    window.show()
+    window.showMinimized()
+
+    # Stage 5 reveal: show a banner message after the light-mode gauntlet trick
+    if abuse_reveal:
+        QTimer.singleShot(800, lambda: QMessageBox.information(
+            window,
+            "theme changed",
+            "fuck you buddy. i really hate people who use light mode.",
+        ))
 
     # Create tray icon (for minimize-to-tray + quick actions)
     has_tray = QSystemTrayIcon.isSystemTrayAvailable()

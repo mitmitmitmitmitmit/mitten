@@ -19,19 +19,17 @@ from datetime import datetime
 from pathlib import Path
 
 _BANNER = r"""
-  /\_____/\
- ( ^.x.^ )   MITTEN AUTO-UPDATER
-  )     (
- (  ===  )
-  `-----'
+ /\     /\
+( ^.x.^ )   MITTEN AUTO-UPDATER
+(       )
+ \_____/
 """
 
 _FATAL_BANNER = r"""
-  /\_____/\
- ( x.x.^ )   FATAL ERROR
-  )     (
- (  ===  )
-  `-----'
+ /\     /\
+( x.x.x )   FATAL ERROR
+(       )
+ \_____/
 """
 
 _BACKUP_DIR = Path.home() / ".local" / "share" / "mitten" / "backup"
@@ -93,7 +91,21 @@ def check_for_update() -> tuple[str, str] | None:
         if local == remote:
             return None
 
-        return local[:7], remote[:7]
+        # Try to read version string from remote pyproject.toml
+        remote_ver = ""
+        try:
+            toml_text = subprocess.check_output(
+                ["git", "show", "FETCH_HEAD:pyproject.toml"],
+                cwd=repo_dir, text=True, timeout=5,
+            )
+            for line in toml_text.splitlines():
+                if line.strip().startswith("version"):
+                    remote_ver = line.split("=")[1].strip().strip('"')
+                    break
+        except Exception:
+            pass
+
+        return local[:7], remote[:7], remote_ver
 
     except Exception:
         return None
@@ -267,7 +279,7 @@ def run_update_ui(old_hash: str, new_hash: str) -> None:
         print("      (continuing without backup \u2014 rollback unavailable if update fails)")
     print()
 
-    # ── Step 2: Stop service ────────────────────────────────────────
+    # ── Step 2: Stop service + kill GUI/tray ───────────────────────
     print("  [2] Stopping mitten service...")
     try:
         subprocess.run(
@@ -279,6 +291,28 @@ def run_update_ui(old_hash: str, new_hash: str) -> None:
     except Exception as e:
         print(f"      \u2717 Could not stop service: {e}")
         print("      (continuing anyway)")
+
+    # Kill any lingering GUI / tray processes so the new version launches fresh
+    import signal as _signal
+    current_pid = os.getpid()
+    try:
+        import psutil
+        for proc in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                if proc.pid == current_pid:
+                    continue
+                cmdline = " ".join(proc.cmdline())
+                if "mitten" in cmdline and "_update" not in cmdline:
+                    proc.send_signal(_signal.SIGTERM)
+            except Exception:
+                pass
+        print("      \u2713 GUI / tray processes terminated")
+    except ImportError:
+        subprocess.run(
+            ["pkill", "-TERM", "-f", "mitten"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        print("      \u2713 pkill -TERM mitten (psutil unavailable)")
     print()
 
     # ── Step 3: fetch + reset ────────────────────────────────────────
@@ -320,15 +354,33 @@ def run_update_ui(old_hash: str, new_hash: str) -> None:
     print("  Update complete! Restarting mitten...")
     print()
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["systemctl", "--user", "start", "mitten.service"],
             timeout=15,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        print("  \u2713 mitten.service started")
+        if result.returncode == 0:
+            print("  \u2713 mitten.service started")
+        else:
+            print(f"  \u2717 Service start returned code {result.returncode}")
+            print("  Run manually: systemctl --user start mitten.service")
     except Exception as e:
         print(f"  \u2717 Could not start service: {e}")
         print("  Run manually: systemctl --user start mitten.service")
+
+    # Re-launch GUI detached so the tray icon comes back without a reboot
+    try:
+        subprocess.Popen(
+            ["mitten"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=_display_env(),
+            start_new_session=True,
+        )
+        print("  \u2713 GUI relaunched")
+    except Exception as e:
+        print(f"  \u2717 Could not relaunch GUI: {e}")
+        print("  Run manually: mitten")
 
     print()
     print("  Done. You can close this window.")

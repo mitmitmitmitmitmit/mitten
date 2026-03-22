@@ -16,6 +16,8 @@ DEFAULT_CONFIG_SRC = Path(__file__).parent.parent / "default_config.toml"
 TMP_DIR = Path("/tmp/mitten")
 PID_FILE = TMP_DIR / "mitten.pid"
 GUI_SOCKET = TMP_DIR / "gui.sock"
+PAUSE_FILE = TMP_DIR / "paused"          # exists ↔ recording is paused
+RECORDER_DEAD_FILE = TMP_DIR / "recorder_dead"  # exists ↔ recorder gave up
 
 VALID_QUALITIES = {"very_high", "high", "medium", "low"}
 VALID_POSITIONS = {"bottom_right", "bottom_left", "top_right", "top_left"}
@@ -39,6 +41,8 @@ class GeneralConfig:
     framerate: int = 30
     save_dir: Path = Path.home() / "Videos" / "mitten"
     monitor: str = "auto"
+    theme: str = "Default"
+    developer_mode: bool = False
 
 
 @dataclass(frozen=True)
@@ -48,7 +52,9 @@ class RecorderConfig:
     capture_codec: str = "hevc"   # codec for the replay buffer: hevc = better compression in RAM
     output_codec: str = "h264"    # codec for saved clips: h264 = Discord/browser compatible
     watermark_cq: int = 26        # NVENC constant quality: lower = better/larger, higher = smaller/worse
-    audio_device: str = ""       # empty = no audio; use gpu-screen-recorder --list-audio-devices
+    audio_device: str = ""        # empty = no audio; use gpu-screen-recorder --list-audio-devices
+    auto_compress: bool = True    # re-encode clip to fit within compression_target_mb
+    compression_target_mb: int = 10  # target file size for auto_compress
 
 
 @dataclass(frozen=True)
@@ -62,6 +68,7 @@ class WatermarkConfig:
     enabled: bool = True
     text: str = "~( ^.x.^)> caught by mitten"
     subtext: str = "programmed by mit"
+    font_family: str = "Sans"
     fontsize: int = 20
     fontcolor: str = "white@0.6"
     position: str = "bottom_right"
@@ -163,6 +170,8 @@ def load_config(config_path: Path | None = None) -> MittenConfig:
             framerate=int(g.get("framerate", 30)),
             save_dir=_resolve_path(g.get("save_dir", "~/Videos/mitten")),
             monitor=str(g.get("monitor", "auto")),
+            theme=str(g.get("theme", "Default")),
+            developer_mode=bool(g.get("developer_mode", False)),
         ),
         recorder=RecorderConfig(
             container=str(r.get("container", "mp4")),
@@ -171,6 +180,8 @@ def load_config(config_path: Path | None = None) -> MittenConfig:
             output_codec=str(r.get("output_codec", "h264")),
             watermark_cq=int(r.get("watermark_cq", 26)),
             audio_device=str(r.get("audio_device", "")),
+            auto_compress=bool(r.get("auto_compress", True)),
+            compression_target_mb=int(r.get("compression_target_mb", 10)),
         ),
         trigger=TriggerConfig(
             button=_parse_button(t.get("button", "BTN_EXTRA")),
@@ -180,6 +191,7 @@ def load_config(config_path: Path | None = None) -> MittenConfig:
             enabled=bool(wm.get("enabled", True)),
             text=str(wm.get("text", "~( ^.x.^)> caught by mitten")),
             subtext=str(wm.get("subtext", "programmed by mit")),
+            font_family=str(wm.get("font_family", "Sans")),
             fontsize=int(wm.get("fontsize", 20)),
             fontcolor=str(wm.get("fontcolor", "white@0.6")),
             position=str(wm.get("position", "bottom_right")),

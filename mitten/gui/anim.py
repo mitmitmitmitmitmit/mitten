@@ -105,8 +105,15 @@ def staggered_fade(
     duration_ms: int = 100,
     stagger_ms: int = 20,
     fade_in_: bool = True,
-) -> None:
-    """Fade a list of widgets in or out with a stagger delay between each."""
+) -> list[QTimer]:
+    """Fade a list of widgets in or out with a stagger delay between each.
+    Returns the QTimer objects so callers can cancel pending steps."""
     fn = fade_in if fade_in_ else fade_out
+    timers: list[QTimer] = []
     for i, widget in enumerate(widgets):
-        QTimer.singleShot(i * stagger_ms, lambda w=widget: fn(w, duration_ms))
+        t = QTimer()
+        t.setSingleShot(True)
+        t.timeout.connect(lambda w=widget: fn(w, duration_ms))
+        t.start(i * stagger_ms)
+        timers.append(t)
+    return timers

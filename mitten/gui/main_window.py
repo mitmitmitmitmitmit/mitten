@@ -5,6 +5,7 @@ Minimizes to tray on close.
 from __future__ import annotations
 
 import random
+import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from pathlib import Path
 from PyQt6.QtCore import (
     QEasingCurve,
     QPropertyAnimation,
+    QThread,
     QTimer,
     Qt,
     QUrl,
@@ -25,6 +27,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -33,8 +36,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .resources import C, CAT, CAT_FONT, CATS, paw_icon
-from ..daemon_utils import get_daemon_pid, toggle_daemon
+from .resources import C, CAT, CAT_FONT, CATS, paw_icon, _accent_rgba, _accent_hover, _hex_rgba
+from ..daemon_utils import get_daemon_pid, toggle_daemon, toggle_pause
+from ..config import PAUSE_FILE, RECORDER_DEAD_FILE
 from ..utils import format_duration, get_vram_usage
 
 
@@ -47,6 +51,7 @@ class _NavButton(QPushButton):
         super().__init__(text, parent)
         self.setCheckable(True)
         self.setFixedHeight(40)
+        self.setMinimumWidth(100)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._update_style(False)
         self.toggled.connect(self._update_style)
@@ -54,7 +59,7 @@ class _NavButton(QPushButton):
     def _update_style(self, checked: bool) -> None:
         if checked:
             self.setStyleSheet(
-                f"QPushButton {{ background-color: rgba(196,167,231,0.10);"
+                f"QPushButton {{ background-color: {_accent_rgba(0.10)};"
                 f"color: {C.LAVENDER}; border: none;"
                 f"border-left: 2px solid {C.LAVENDER};"
                 f"text-align: left; padding-left: 18px; font-weight: 600;"
@@ -68,6 +73,25 @@ class _NavButton(QPushButton):
                 f"QPushButton:hover {{ color: {C.TEXT};"
                 f"background-color: rgba(255,255,255,0.03); }}"
             )
+
+
+# ------------------------------------------------------------------ #
+# Background update checker
+# ------------------------------------------------------------------ #
+
+class _UpdateCheckerThread(QThread):
+    """Runs check_for_update() off the main thread (git fetch is slow)."""
+    update_found = pyqtSignal(str, str, str)  # (old_hash, new_hash, new_version)
+
+    def run(self) -> None:
+        try:
+            from ..updater import check_for_update
+            result = check_for_update()
+            if result:
+                old_hash, new_hash, new_ver = result
+                self.update_found.emit(old_hash, new_hash, new_ver)
+        except Exception:
+            pass
 
 
 # ------------------------------------------------------------------ #
@@ -100,6 +124,24 @@ class _StatusBanner(QFrame):
             "saving clip\u2026",
             "writing your clip to disk",
             C.BLUE,
+        ),
+        "paused": (
+            "~( ^.-.)>",
+            "paused",
+            "buffer paused — press Resume to continue",
+            C.SUBTEXT,
+        ),
+        "recorder_dead": (
+            "~( x.x.^)>",
+            "recorder crashed",
+            "gpu-screen-recorder gave up — restart to recover",
+            C.PINK,
+        ),
+        "error": (
+            "~( x.x.^)>",
+            "error",
+            "something went wrong",
+            C.PINK,
         ),
         "no_deps": (
             "~( x.x.^)>",
@@ -144,6 +186,7 @@ class _StatusBanner(QFrame):
         left.addLayout(row1)
 
         self._detail_label = QLabel("press Start to begin recording")
+        self._detail_label.setWordWrap(True)
         self._detail_label.setStyleSheet(
             f"font-size: 11px; color: {C.SUBTEXT}; background: transparent; border: none;"
         )
@@ -151,10 +194,40 @@ class _StatusBanner(QFrame):
 
         outer.addLayout(left, 1)
 
+        self._btn_update = QPushButton("Update")
+        self._btn_update.setFixedSize(84, 32)
+        self._btn_update.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_update.setStyleSheet(
+            f"QPushButton {{ background-color: {_hex_rgba(C.GREEN, 0.85)}; color: {C.BG};"
+            f"border: none; border-radius: 6px; font-weight: 700; font-size: 12px; }}"
+            f"QPushButton:hover {{ background-color: {C.GREEN}; }}"
+        )
+        self._btn_update.hide()
+
+        self._btn_pause = QPushButton("Pause")
+        self._btn_pause.setFixedSize(90, 32)  # wide enough for "Resume"
+        self._btn_pause.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_pause.setStyleSheet(
+            f"QPushButton {{ background-color: {_hex_rgba(C.BLUE, 0.85)}; color: {C.BG};"
+            f"border: none; border-radius: 6px; font-weight: 700; font-size: 12px; }}"
+            f"QPushButton:hover {{ background-color: {C.BLUE}; }}"
+        )
+        self._btn_pause.hide()
+
         self._btn_toggle = QPushButton("Start")
         self._btn_toggle.setFixedSize(84, 32)
         self._btn_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        outer.addWidget(self._btn_toggle)
+
+        # Group buttons in a sub-layout so hidden buttons don't leave orphan spacing
+        _btn_group = QWidget()
+        _btn_group.setStyleSheet("background: transparent;")
+        _btn_row = QHBoxLayout(_btn_group)
+        _btn_row.setContentsMargins(0, 0, 0, 0)
+        _btn_row.setSpacing(6)
+        _btn_row.addWidget(self._btn_update)
+        _btn_row.addWidget(self._btn_pause)
+        _btn_row.addWidget(self._btn_toggle)
+        outer.addWidget(_btn_group)
 
         self.set_state("idle")
 
@@ -165,8 +238,15 @@ class _StatusBanner(QFrame):
 
         self.setStyleSheet(
             f"QFrame {{ background-color: transparent;"
-            f"border-radius: 10px; border: 1px solid rgba(58,54,80,0.4); }}"
+            f"border-radius: 10px; border: 1px solid {_hex_rgba(C.BORDER, 0.4)}; }}"
         )
+
+        # Use theme-aware contextual cat for this state
+        try:
+            from . import themes as _themes_mod
+            ascii_art = _themes_mod.get_state_cat(state)
+        except Exception:
+            pass
 
         self._ascii_label.setText(ascii_art)
         self._ascii_label.setStyleSheet(
@@ -180,28 +260,64 @@ class _StatusBanner(QFrame):
             f"background: transparent; border: none;"
         )
 
-        self._detail_label.setText(detail or default_detail)
+        # Light mode: replace idle detail with rotating abuse.
+        # Import the themes MODULE (not just the variable) so we always read the live value,
+        # not a snapshot from when the function was first called.
+        if not detail and state == "idle":
+            try:
+                from . import themes as _themes_mod
+                if _themes_mod.LIGHT_MODE_ACTIVE:
+                    default_detail = _themes_mod.get_abuse()
+            except Exception:
+                pass
+        # Light mode: also append abuse to recording detail ~40% of the time
+        if state == "recording" and detail:
+            try:
+                from . import themes as _themes_mod
+                import random as _rnd
+                if _themes_mod.LIGHT_MODE_ACTIVE and _rnd.random() < 0.40:
+                    detail = detail + " · " + _themes_mod.get_abuse()
+            except Exception:
+                pass
+        _detail_text = detail or default_detail
+        self._detail_label.setText(_detail_text)
         self._detail_label.setStyleSheet(
             f"font-size: 11px; color: {C.SUBTEXT}; background: transparent; border: none;"
         )
 
-        no_deps = state == "no_deps"
-        self._btn_toggle.setEnabled(not no_deps)
+        dead = state == "no_deps" or state == "recorder_dead"
+        self._btn_toggle.setEnabled(not dead)
 
         running = state in ("recording", "game", "saving")
-        self._btn_toggle.setText("Stop" if running else "Start")
+        paused = state == "paused"
+
+        # Pause button: visible when recording or paused; label flips
         if running:
+            self._btn_pause.setText("Pause")
+            self._btn_pause.show()
+        elif paused:
+            self._btn_pause.setText("Resume")
+            self._btn_pause.show()
+        else:
+            self._btn_pause.hide()
+
+        self._btn_toggle.setText("Stop" if (running or paused) else "Start")
+        if running or paused:
             self._btn_toggle.setStyleSheet(
-                f"QPushButton {{ background-color: rgba(243,139,168,0.85); color: {C.BG};"
+                f"QPushButton {{ background-color: {_hex_rgba(C.PINK, 0.85)}; color: {C.BG};"
                 f"border: none; border-radius: 6px; font-weight: 700; font-size: 12px; }}"
                 f"QPushButton:hover {{ background-color: {C.PINK}; }}"
             )
         else:
             self._btn_toggle.setStyleSheet(
-                f"QPushButton {{ background-color: rgba(166,227,161,0.85); color: {C.BG};"
+                f"QPushButton {{ background-color: {_hex_rgba(C.GREEN, 0.85)}; color: {C.BG};"
                 f"border: none; border-radius: 6px; font-weight: 700; font-size: 12px; }}"
                 f"QPushButton:hover {{ background-color: {C.GREEN}; }}"
             )
+
+    def show_update_available(self) -> None:
+        """Make the Update button visible in the banner."""
+        self._btn_update.show()
 
 
 # ------------------------------------------------------------------ #
@@ -221,12 +337,21 @@ class _StatCard(QFrame):
         self._hover_anim: QPropertyAnimation | None = None
         self._apply_style(0.32)
         self.setMinimumHeight(82)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 10)
         layout.setSpacing(5)
 
-        lbl = QLabel(label)
+        _lbl_text = label
+        try:
+            from . import themes as _themes_mod
+            import random as _rnd
+            if _themes_mod.LIGHT_MODE_ACTIVE and _rnd.random() < 0.20:
+                _lbl_text = _themes_mod.get_abuse().upper()
+        except Exception:
+            pass
+        lbl = QLabel(_lbl_text)
         lbl.setStyleSheet(
             f"color: {C.SUBTEXT}; font-size: 10px; font-weight: 700;"
             f"letter-spacing: 1.2px; border: none; background: transparent;"
@@ -242,9 +367,9 @@ class _StatCard(QFrame):
 
     def _apply_style(self, alpha: float) -> None:
         # Border swaps from gray → lavender midway through hover
-        border = "rgba(196,167,231,0.28)" if alpha > 0.43 else "rgba(58,54,80,0.28)"
+        border = _accent_rgba(0.28) if alpha > 0.43 else _hex_rgba(C.BORDER, 0.28)
         self.setStyleSheet(
-            f"QFrame {{ background-color: rgba(37,35,54,{alpha:.2f});"
+            f"QFrame {{ background-color: {_hex_rgba(C.SURFACE, alpha)};"
             f"border-radius: 10px; border: 1px solid {border}; }}"
         )
 
@@ -281,19 +406,54 @@ class _StatCard(QFrame):
 
 
 # ------------------------------------------------------------------ #
+# Duration prober (background thread for clip preview badge)
+# ------------------------------------------------------------------ #
+
+class _DurProber(QThread):
+    """One-shot ffprobe thread — emits formatted duration string."""
+    done = pyqtSignal(str)
+
+    def __init__(self, path: Path, parent=None) -> None:
+        super().__init__(parent)
+        self._path = path
+
+    def run(self) -> None:
+        try:
+            result = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", str(self._path)],
+                capture_output=True, text=True, timeout=10,
+            )
+            secs = max(0, int(float(result.stdout.strip())))
+            m, s = divmod(secs, 60)
+            h, m = divmod(m, 60)
+            self.done.emit(f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}")
+        except Exception:
+            self.done.emit("")
+
+
+# ------------------------------------------------------------------ #
 # Clip preview (auto-play muted loop)
 # ------------------------------------------------------------------ #
 
 class _ClipPreview(QFrame):
-    """Auto-looping muted preview of the last clip."""
+    """Auto-looping muted preview of the last clip. Hover plays audio."""
+
+    hovered = pyqtSignal(bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setStyleSheet(
-            f"QFrame {{ background-color: #0d0b14; border-radius: 8px; }}"
+            f"QFrame {{ background-color: {C.BG}; border-radius: 8px; }}"
         )
         self._clip_path: Path | None = None
         self._media_player = None
+        self._audio_proc: subprocess.Popen | None = None
+        self._dur_prober: _DurProber | None = None
+        # Delayed audio stop for soft fade-out effect on mouse leave
+        self._audio_stop_timer = QTimer(self)
+        self._audio_stop_timer.setSingleShot(True)
+        self._audio_stop_timer.timeout.connect(self._stop_audio)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -308,6 +468,9 @@ class _ClipPreview(QFrame):
                 Qt.AspectRatioMode.KeepAspectRatioByExpanding
             )
             self._player_widget.setMinimumHeight(160)
+            self._player_widget.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )
             self._media_player = QMediaPlayer()
             audio = QAudioOutput()
             audio.setVolume(0)   # muted — just a living thumbnail
@@ -331,15 +494,95 @@ class _ClipPreview(QFrame):
         self._name_label.setStyleSheet(
             f"color: {C.SUBTEXT}; font-size: 11px;"
             f"padding: 6px 12px;"
-            f"background: rgba(13,11,20,0.7);"
+            f"background: {_hex_rgba(C.BG, 0.7)};"
             f"border-radius: 0 0 8px 8px;"
         )
         layout.addWidget(self._name_label)
 
+        # Duration badge overlay (bottom-right, above name strip)
+        self._dur_badge = QLabel(self)
+        self._dur_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._dur_badge.setStyleSheet(
+            "background: rgba(0,0,0,0.55); color: white; font-size: 10px;"
+            "font-weight: 600; border-radius: 10px; padding: 2px 8px;"
+        )
+        self._dur_badge.hide()
+
+        # Play icon overlay (centered)
+        self._play_icon = QLabel("▶", self)
+        self._play_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._play_icon.setFixedSize(56, 56)
+        self._play_icon.setStyleSheet(
+            "background: rgba(0,0,0,0.5); color: rgba(255,255,255,0.9);"
+            "font-size: 22px; border-radius: 28px;"
+        )
+        self._play_icon.hide()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._reposition_overlays()
+
+    def _reposition_overlays(self) -> None:
+        name_h = 32  # approximate name strip height
+        w, h = self.width(), self.height()
+        # Duration badge: bottom-right, just above name strip
+        bw = max(self._dur_badge.sizeHint().width(), 50)
+        self._dur_badge.setGeometry(w - bw - 10, h - name_h - 26, bw, 22)
+        self._dur_badge.raise_()
+        # Play icon: centered in video area above name strip
+        self._play_icon.move((w - 56) // 2, (h - name_h - 56) // 2)
+        self._play_icon.raise_()
+
+    def _start_audio(self, path: Path) -> None:
+        self._stop_audio()
+        try:
+            self._audio_proc = subprocess.Popen(
+                [
+                    "ffplay", "-nodisp", "-autoexit",
+                    "-af", "afade=t=in:st=0:d=3.0,volume=0.35",
+                    str(path),
+                ],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            pass
+
+    def _stop_audio(self) -> None:
+        if self._audio_proc and self._audio_proc.poll() is None:
+            self._audio_proc.terminate()
+        self._audio_proc = None
+
+    def enterEvent(self, event) -> None:
+        self._audio_stop_timer.stop()
+        if self._clip_path and self._clip_path.exists():
+            if self._media_player:
+                self._media_player.setPosition(0)
+                self._media_player.play()
+            self._start_audio(self._clip_path)
+            self._play_icon.show()
+            self._reposition_overlays()
+        self.hovered.emit(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._audio_stop_timer.start(400)
+        self._play_icon.hide()
+        self.hovered.emit(False)
+        super().leaveEvent(event)
+
     def set_clip(self, path: Path | None) -> None:
         if path == self._clip_path:
             return
+        self._audio_stop_timer.stop()
+        self._stop_audio()
         self._clip_path = path
+        self._dur_badge.hide()
+        self._play_icon.hide()
+        # Cancel any running prober
+        if self._dur_prober and self._dur_prober.isRunning():
+            self._dur_prober.quit()
+            self._dur_prober.wait(2000)
+        self._dur_prober = None
         if path and path.exists():
             size_mb = path.stat().st_size / (1024 * 1024)
             short = path.stem.replace("mitten_", "").replace("_", " ")
@@ -347,10 +590,27 @@ class _ClipPreview(QFrame):
             if self._media_player:
                 self._media_player.setSource(QUrl.fromLocalFile(str(path)))
                 self._media_player.play()
+            # Probe duration in background
+            self._dur_prober = _DurProber(path, self)
+            self._dur_prober.done.connect(self._on_dur_ready)
+            self._dur_prober.start()
         else:
             self._name_label.setText("no clips yet")
             if self._media_player:
                 self._media_player.stop()
+
+    def set_saving(self) -> None:
+        """Show a placeholder while a clip is being processed."""
+        self._name_label.setText("saving your clip\u2026")
+        self._dur_badge.hide()
+        if self._media_player:
+            self._media_player.stop()
+
+    def _on_dur_ready(self, dur_str: str) -> None:
+        if dur_str:
+            self._dur_badge.setText(dur_str)
+            self._dur_badge.show()
+            self._reposition_overlays()
 
     def _on_status(self, status) -> None:
         from PyQt6.QtMultimedia import QMediaPlayer
@@ -414,16 +674,16 @@ class _PillTabBar(QWidget):
     def _style_btn(self, btn: QPushButton, active: bool) -> None:
         if active:
             btn.setStyleSheet(
-                f"QPushButton {{ background: rgba(196,167,231,0.15); color: {C.LAVENDER};"
-                f"border: 1px solid rgba(196,167,231,0.3); border-radius: 12px;"
+                f"QPushButton {{ background: {_accent_rgba(0.15)}; color: {C.LAVENDER};"
+                f"border: 1px solid {_accent_rgba(0.3)}; border-radius: 12px;"
                 f"font-size: 11px; font-weight: 600; padding: 0 14px; }}"
             )
         else:
             btn.setStyleSheet(
                 f"QPushButton {{ background: transparent; color: {C.SUBTEXT};"
-                f"border: 1px solid rgba(58,54,80,0.3); border-radius: 12px;"
+                f"border: 1px solid {C.BORDER}; border-radius: 12px;"
                 f"font-size: 11px; font-weight: 600; padding: 0 14px; }}"
-                f"QPushButton:hover {{ color: {C.TEXT}; border-color: rgba(58,54,80,0.6); }}"
+                f"QPushButton:hover {{ color: {C.TEXT}; border-color: {C.LAVENDER}; }}"
             )
 
     def _on_click(self, idx: int) -> None:
@@ -439,6 +699,7 @@ class _PillTabBar(QWidget):
 class _DashboardPage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._anims: dict[str, QPropertyAnimation] = {}
 
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -456,11 +717,19 @@ class _DashboardPage(QWidget):
         self.banner = _StatusBanner()
         layout.addWidget(self.banner)
 
-        layout.addWidget(_section_header("PERFORMANCE"))
+        # ── Performance container — fades + collapses on clip hover ──
+        self._perf_container = QWidget()
+        self._perf_container.setStyleSheet("background: transparent;")
+        self._perf_natural_h: int = 0
+        perf_layout = QVBoxLayout(self._perf_container)
+        perf_layout.setContentsMargins(0, 0, 0, 0)
+        perf_layout.setSpacing(14)
+
+        perf_layout.addWidget(_section_header("PERFORMANCE"))
 
         # Pill tab bar
         self._pill_bar = _PillTabBar(["RAM", "GPU · CPU", "CLIPS"])
-        layout.addWidget(self._pill_bar)
+        perf_layout.addWidget(self._pill_bar)
 
         # Stacked content pages
         self._stat_stack = QStackedWidget()
@@ -470,9 +739,12 @@ class _DashboardPage(QWidget):
         ram_layout = QHBoxLayout(ram_page)
         ram_layout.setContentsMargins(0, 4, 0, 0)
         ram_layout.setSpacing(10)
-        self.card_ram = _StatCard("MITTEN RAM", C.LAVENDER)
-        ram_layout.addWidget(self.card_ram)
-        ram_layout.addStretch()
+        self.card_ram_total  = _StatCard("TOTAL RAM",  C.SUBTEXT)
+        self.card_ram_used   = _StatCard("USED RAM",   C.ORANGE)
+        self.card_ram_mitten = _StatCard("MITTEN",     C.LAVENDER)
+        ram_layout.addWidget(self.card_ram_total)
+        ram_layout.addWidget(self.card_ram_used)
+        ram_layout.addWidget(self.card_ram_mitten)
         self._stat_stack.addWidget(ram_page)  # index 0
 
         # ── GPU · CPU page ──
@@ -480,11 +752,12 @@ class _DashboardPage(QWidget):
         gpu_layout = QHBoxLayout(gpu_page)
         gpu_layout.setContentsMargins(0, 4, 0, 0)
         gpu_layout.setSpacing(10)
-        self.card_vram = _StatCard("GPU VRAM", C.ORANGE)
-        self.card_cpu  = _StatCard("CPU", C.BLUE)
+        self.card_vram       = _StatCard("GPU VRAM",   C.ORANGE)
+        self.card_cpu        = _StatCard("CPU TOTAL",  C.BLUE)
+        self.card_cpu_mitten = _StatCard("MITTEN CPU", C.GREEN)
         gpu_layout.addWidget(self.card_vram)
         gpu_layout.addWidget(self.card_cpu)
-        gpu_layout.addStretch()
+        gpu_layout.addWidget(self.card_cpu_mitten)
         self._stat_stack.addWidget(gpu_page)  # index 1
 
         # ── CLIPS page ──
@@ -498,22 +771,39 @@ class _DashboardPage(QWidget):
         clips_layout.addWidget(self.card_week)
         clips_layout.addWidget(self.card_avg_save)
         clips_layout.addWidget(self.card_compress)
-        clips_layout.addStretch()
         self._stat_stack.addWidget(clips_page)  # index 2
 
-        layout.addWidget(self._stat_stack)
-
+        perf_layout.addWidget(self._stat_stack)
         self._pill_bar.tab_changed.connect(self._on_tab_changed)
 
-        layout.addWidget(_section_header("LAST CLIP"))
+        est_lbl = QLabel("* RSS / cpu_percent \u2014 approximations, not exact process accounting")
+        est_lbl.setStyleSheet(
+            f"color: {_hex_rgba(C.SUBTEXT, 0.38)}; font-size: 9px; padding-top: 1px;"
+        )
+        perf_layout.addWidget(est_lbl)
+
+        layout.addWidget(self._perf_container)
+
+        self._last_clip_header = _section_header("LAST CLIP")
+        layout.addWidget(self._last_clip_header)
 
         self.clip_preview = _ClipPreview()
         self.clip_preview.setMinimumHeight(180)
         layout.addWidget(self.clip_preview, 1)
 
+        self.clip_preview.hovered.connect(self._on_preview_hover)
+
         outer.addStretch(1)
         outer.addWidget(self._content, 6)
         outer.addStretch(1)
+
+    def _start_anim(self, key: str, anim: QPropertyAnimation) -> None:
+        old = self._anims.get(key)
+        if old and old.state() == QPropertyAnimation.State.Running:
+            old.stop()
+        self._anims[key] = anim
+        if anim.state() != QPropertyAnimation.State.Running:
+            anim.start()
 
     def _on_tab_changed(self, idx: int) -> None:
         from .anim import cross_fade
@@ -521,7 +811,302 @@ class _DashboardPage(QWidget):
         self._stat_stack.setCurrentIndex(idx)
         new = self._stat_stack.currentWidget()
         if old and new and old is not new:
-            cross_fade(old, new, duration_ms=180)
+            out_anim, in_anim = cross_fade(old, new, duration_ms=180)
+            self._start_anim("tab_out", out_anim)
+            self._start_anim("tab_in", in_anim)
+
+    def _on_preview_hover(self, is_hovered: bool) -> None:
+        from .anim import fade_in, fade_out
+        c = self._perf_container
+        if is_hovered:
+            if self._perf_natural_h == 0:
+                self._perf_natural_h = c.sizeHint().height()
+            fade_out(c, duration_ms=200, on_done=self._collapse_perf)
+        else:
+            self._expand_perf()
+
+    def _collapse_perf(self) -> None:
+        c = self._perf_container
+        if self._perf_natural_h == 0:
+            self._perf_natural_h = max(c.height(), c.sizeHint().height())
+        anim = QPropertyAnimation(c, b"maximumHeight", c)
+        anim.setDuration(260)
+        anim.setStartValue(c.height())
+        anim.setEndValue(0)
+        anim.setEasingCurve(QEasingCurve.Type.InCubic)
+        self._start_anim("perf_collapse", anim)
+
+    def _expand_perf(self) -> None:
+        from .anim import fade_in
+        c = self._perf_container
+        target = self._perf_natural_h or 200
+        anim = QPropertyAnimation(c, b"maximumHeight", c)
+        anim.setDuration(280)
+        anim.setStartValue(c.maximumHeight())
+        anim.setEndValue(target)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.finished.connect(lambda: c.setMaximumHeight(16777215) if c else None)
+        self._start_anim("perf_expand", anim)
+        fade_in(c, duration_ms=280)
+
+
+# ------------------------------------------------------------------ #
+# About page — review slider
+# ------------------------------------------------------------------ #
+
+class _ReviewSlider(QFrame):
+    """Medal complaint / mitten response carousel."""
+
+    _SLIDES = [
+        (
+            '"when idling at desktop medal is using around 600mb of memory. '
+            'when gaming it jumps to 1000mb and around 25% of my gpu. '
+            'just for a 720p 60fps replay buffer."',
+            "r/MedalTV",
+            "yeah, that's not happening here. mitten hits nvenc directly. "
+            "idles during gameplay, barely registers on any gpu meter. "
+            "your 1080p60 buffer sits under 300mb. medal chews through your ram doing nothing useful.",
+        ),
+        (
+            '"medal is windows only. no linux support, no plans for linux support."',
+            "medal.tv faq",
+            "you're on linux. they don't care. mitten was built for this. "
+            "wayland native, systemd service, nvenc, no compatibility layers. "
+            "medal's faq says 'no plans.' ok.",
+        ),
+        (
+            '"they paywalled clip length. used to be unlimited, '
+            'now you need medal pro for clips over 60 seconds."',
+            "r/MedalTV",
+            "your buffer is however long you set it. right now. no account, no tier, "
+            "no email asking you to upgrade. you set a number in config and that's your buffer. "
+            "medal took something free and charged you for it back. mitten never will.",
+        ),
+        (
+            '"ads started showing up in the overlay during gameplay. '
+            'no way to disable them without paying for premium."',
+            "r/MedalTV",
+            "there is no overlay. there are no ads. there is no account to serve them to. "
+            "mitten doesn't know who you are and doesn't want to. "
+            "it records your screen, saves your clip, and shuts up.",
+        ),
+        (
+            '"medal crashed and i lost my entire session. '
+            'hours of gameplay just gone with no warning."',
+            "r/MedalTV",
+            "every clip is its own ffmpeg job. one crashes, the others are fine. "
+            "everything is on your local disk. no cloud sync to fail. "
+            "you own your clips. medal's servers going down isn't your problem.",
+        ),
+    ]
+
+    @staticmethod
+    def _get_slides():
+        """Return slides, injecting light mode insults if active."""
+        try:
+            from .themes import LIGHT_MODE_ACTIVE, get_abuse
+            if LIGHT_MODE_ACTIVE:
+                import random as _r
+                abused = []
+                for quote, source, response in _ReviewSlider._SLIDES:
+                    extra = f" also you're using light mode. {get_abuse(include_name=False)}"
+                    abused.append((quote, source, response + extra))
+                return abused
+        except Exception:
+            pass
+        return _ReviewSlider._SLIDES
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setStyleSheet("QFrame { background: transparent; }")
+        self._idx = 0
+        self._anim: QPropertyAnimation | None = None
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self._stack = QStackedWidget()
+        _slides = self._get_slides()
+        for quote, source, response in _slides:
+            self._stack.addWidget(self._make_slide(quote, source, response))
+        layout.addWidget(self._stack)
+
+        nav = QHBoxLayout()
+        nav.setContentsMargins(0, 0, 0, 0)
+        nav.setSpacing(6)
+
+        btn_style = (
+            f"QPushButton {{ background: {_accent_rgba(0.08)}; color: {C.LAVENDER};"
+            f"border: 1px solid {_accent_rgba(0.2)}; border-radius: 11px;"
+            f"font-size: 12px; min-width: 22px; max-width: 22px;"
+            f"min-height: 22px; max-height: 22px; }}"
+            f"QPushButton:hover {{ background: {_accent_rgba(0.18)}; }}"
+        )
+        self._btn_prev = QPushButton("\u2190")
+        self._btn_prev.setStyleSheet(btn_style)
+        self._btn_next = QPushButton("\u2192")
+        self._btn_next.setStyleSheet(btn_style)
+
+        nav.addWidget(self._btn_prev)
+        nav.addStretch()
+        self._dot_labels: list[QLabel] = []
+        for i in range(len(_slides)):
+            dot = QLabel("\u2022" if i == 0 else "\u25e6")
+            dot.setStyleSheet(
+                f"color: {C.LAVENDER if i == 0 else C.SUBTEXT}; font-size: 14px; background: transparent;"
+            )
+            self._dot_labels.append(dot)
+            nav.addWidget(dot)
+        nav.addStretch()
+        nav.addWidget(self._btn_next)
+        layout.addLayout(nav)
+
+        self._btn_prev.clicked.connect(self._prev)
+        self._btn_next.clicked.connect(self._next)
+
+    def _make_slide(self, quote: str, source: str, response: str) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        wl = QVBoxLayout(w)
+        wl.setContentsMargins(0, 0, 0, 0)
+        wl.setSpacing(8)
+
+        block = QFrame()
+        block.setFrameShape(QFrame.Shape.NoFrame)
+        block.setStyleSheet(
+            f"QFrame {{ background-color: {_hex_rgba(C.SURFACE, 0.5)};"
+            f"border: none; border-left: 3px solid {C.PINK};"
+            f"border-radius: 0 6px 6px 0; }}"
+        )
+        bl = QVBoxLayout(block)
+        bl.setContentsMargins(14, 12, 14, 12)
+        bl.setSpacing(6)
+        q_lbl = QLabel(quote)
+        q_lbl.setWordWrap(True)
+        q_lbl.setStyleSheet(f"color: {C.TEXT}; font-size: 12px; background: transparent;")
+        bl.addWidget(q_lbl)
+        src_lbl = QLabel(f"\u2014 {source}")
+        src_lbl.setStyleSheet(f"color: {C.GRAY}; font-size: 10px; background: transparent;")
+        bl.addWidget(src_lbl)
+        wl.addWidget(block)
+
+        resp = QLabel(f"mitten: {response}")
+        resp.setWordWrap(True)
+        resp.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 12px; background: transparent;")
+        wl.addWidget(resp)
+        return w
+
+    def _animate_to(self, new_idx: int) -> None:
+        if self._anim and self._anim.state() == QPropertyAnimation.State.Running:
+            self._anim.stop()
+        self._stack.setCurrentIndex(new_idx)
+        new_w = self._stack.currentWidget()
+        if new_w:
+            eff = QGraphicsOpacityEffect(new_w)
+            eff.setOpacity(0.0)
+            new_w.setGraphicsEffect(eff)
+            anim = QPropertyAnimation(eff, b"opacity", new_w)
+            anim.setDuration(180)
+            anim.setStartValue(0.0)
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            anim.finished.connect(lambda: new_w.setGraphicsEffect(None))
+            anim.start()
+            self._anim = anim
+
+    def _prev(self) -> None:
+        self._idx = (self._idx - 1) % len(self._SLIDES)
+        self._animate_to(self._idx)
+        self._update_dots()
+
+    def _next(self) -> None:
+        self._idx = (self._idx + 1) % len(self._SLIDES)
+        self._animate_to(self._idx)
+        self._update_dots()
+
+    def _update_dots(self) -> None:
+        for i, dot in enumerate(self._dot_labels):
+            dot.setText("\u2022" if i == self._idx else "\u25e6")
+            dot.setStyleSheet(
+                f"color: {C.LAVENDER if i == self._idx else C.SUBTEXT}; "
+                f"font-size: 14px; background: transparent;"
+            )
+
+
+# ------------------------------------------------------------------ #
+# About page — system info collapsible
+# ------------------------------------------------------------------ #
+
+class _SysInfoSection(QWidget):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._toggle = QPushButton("\u25b8  your setup")
+        self._toggle.setCheckable(True)
+        self._toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._toggle.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {C.SUBTEXT};"
+            f"border: none; text-align: left; font-size: 12px; padding: 4px 0; }}"
+            f"QPushButton:hover {{ color: {C.TEXT}; }}"
+            f"QPushButton:checked {{ color: {C.LAVENDER}; }}"
+        )
+        self._toggle.toggled.connect(self._on_toggle)
+        layout.addWidget(self._toggle)
+
+        self._body = QWidget()
+        self._body.setStyleSheet(
+            f"background: {_hex_rgba(C.SURFACE, 0.35)}; border-radius: 6px;"
+        )
+        bl = QVBoxLayout(self._body)
+        bl.setContentsMargins(14, 10, 14, 10)
+        bl.setSpacing(4)
+        self._lines: list[QLabel] = []
+        for _ in range(6):
+            lbl = QLabel()
+            lbl.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 11px; background: transparent;")
+            bl.addWidget(lbl)
+            self._lines.append(lbl)
+        self._body.hide()
+        layout.addWidget(self._body)
+
+    def _on_toggle(self, checked: bool) -> None:
+        self._toggle.setText(("\u25be" if checked else "\u25b8") + "  your setup")
+        if checked:
+            self._populate()
+        self._body.setVisible(checked)
+
+    def _populate(self) -> None:
+        rows: list[str] = []
+        try:
+            from ..config import load_config
+            cfg = load_config()
+            rows.append(f"buffer    {cfg.general.buffer_seconds}s")
+            rows.append(f"monitor   {cfg.general.monitor}")
+            rows.append(f"trigger   {cfg.trigger.button}")
+            rows.append(f"mode      {cfg.general.mode}")
+        except Exception:
+            rows.append("config    unavailable")
+        try:
+            from ..daemon_utils import get_daemon_pid
+            pid = get_daemon_pid()
+            rows.append(f"daemon    {'running (pid ' + str(pid) + ')' if pid else 'stopped'}")
+        except Exception:
+            rows.append("daemon    unknown")
+        try:
+            import subprocess as _sp
+            r = _sp.run(
+                ["gpu-screen-recorder", "--version"],
+                capture_output=True, text=True, timeout=5,
+            )
+            ver = (r.stdout.strip() or r.stderr.strip()).split("\n")[0][:40]
+            rows.append(f"gsr       {ver}")
+        except Exception:
+            rows.append("gsr       not found")
+        for i, lbl in enumerate(self._lines):
+            lbl.setText(rows[i] if i < len(rows) else "")
 
 
 # ------------------------------------------------------------------ #
@@ -540,7 +1125,7 @@ class _AboutPage(QWidget):
         scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
 
         inner = QWidget()
-        inner.setMaximumWidth(580)
+        inner.setMaximumWidth(920)
         layout = QVBoxLayout(inner)
         layout.setContentsMargins(40, 36, 40, 40)
         layout.setSpacing(0)
@@ -572,140 +1157,241 @@ class _AboutPage(QWidget):
         def _divider() -> QWidget:
             line = QWidget()
             line.setFixedHeight(1)
-            line.setStyleSheet(f"background-color: rgba(58,54,80,0.4);")
+            line.setStyleSheet(f"background-color: {_hex_rgba(C.BORDER, 0.4)};")
             return line
 
-        # ── Header ──
-        layout.addWidget(_h("~( ^.x.^)>  mitten", 26))
-        layout.addWidget(_gap(6))
+        def _pill(text: str, color: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setStyleSheet(
+                f"color: {color}; background: transparent;"
+                f"border: 1px solid {color}; border-radius: 11px;"
+                f"padding: 3px 10px; font-size: 11px;"
+            )
+            return lbl
+
+        # ── Version badge + tagline ──
+        ver_row = QHBoxLayout()
+        ver_row.setContentsMargins(0, 0, 0, 0)
+        ver_row.setSpacing(10)
+        try:
+            import importlib.metadata
+            ver_str = importlib.metadata.version("mitten")
+        except Exception:
+            ver_str = "0.2.x"
+        ver_badge = QLabel(f"v{ver_str}")
+        ver_badge.setStyleSheet(
+            f"color: {C.LAVENDER}; background: {_accent_rgba(0.12)};"
+            f"border: 1px solid {_accent_rgba(0.3)}; border-radius: 10px;"
+            f"padding: 2px 10px; font-size: 11px; font-weight: 600;"
+        )
+        ver_row.addWidget(ver_badge)
+        ver_row.addStretch()
+        layout.addLayout(ver_row)
+        layout.addWidget(_gap(10))
         layout.addWidget(_p(
-            "a replay buffer for linux. press a button, save the last N seconds. that's it.",
-            C.SUBTEXT, 13,
+            "a replay buffer for linux. press a button, save the last n seconds. that's it.",
+            C.SUBTEXT, 14,
         ))
 
-        layout.addWidget(_gap(28))
-        layout.addWidget(_divider())
+        # Light mode: ~50% chance — slip an abuse label between the tagline and the first section
+        try:
+            from . import themes as _themes_mod
+            if _themes_mod.LIGHT_MODE_ACTIVE and random.random() < 0.5:
+                _abuse_lbl = QLabel(_themes_mod.get_abuse())
+                _abuse_lbl.setWordWrap(True)
+                _abuse_lbl.setStyleSheet(
+                    f"color: {C.SUBTEXT}; font-size: 11px; font-style: italic;"
+                    f"background: transparent;"
+                )
+                layout.addWidget(_gap(8))
+                layout.addWidget(_abuse_lbl)
+        except Exception:
+            pass
+
         layout.addWidget(_gap(24))
-
-        # ── Why MITTEN exists ──
-        layout.addWidget(_h("why i made this", 16, C.LAVENDER))
-        layout.addWidget(_gap(10))
-        layout.addWidget(_p(
-            "medal is windows only. not \"works better on windows\", "
-            "straight up windows only. so that was already a no."
-        ))
-        layout.addWidget(_gap(10))
-        layout.addWidget(_p(
-            "and even on windows it's genuinely bad. it tanks your performance, "
-            "shoves ads in your face, paywalls stuff that used to be free, and the "
-            "company behind it is just kind of slop. it feels like a startup that "
-            "found out gamers save clips and decided to monetize that as hard as possible."
-        ))
-        layout.addWidget(_gap(10))
-        layout.addWidget(_p(
-            "so i made mitten. it keeps a rolling buffer in ram, watermarks your clips, "
-            "detects when you're in a game, and gets out of your way. "
-            "no account, no cloud, no nonsense."
-        ))
-
-        layout.addWidget(_gap(28))
         layout.addWidget(_divider())
+        layout.addWidget(_gap(20))
+
+        # ── Why mitten exists ──
+        layout.addWidget(_h("why i made this", 15, C.LAVENDER))
+        layout.addWidget(_gap(10))
+        layout.addWidget(_p(
+            "medal doesn't run on linux. not 'limited support', "
+            "straight up doesn't exist. so that was already a no."
+        ))
+        layout.addWidget(_gap(8))
+        layout.addWidget(_p(
+            "and even on windows it sucks. idles at 20%+ gpu on a 3090. "
+            "ads in the overlay during gameplay, no way to disable without paying. "
+            "paywalled clip length that used to be free. uploads your clips publicly by default. "
+            "one user called it malware for reinstalling itself after uninstall. they weren't wrong."
+        ))
+        layout.addWidget(_gap(8))
+        layout.addWidget(_p(
+            "so i made mitten. your clips stay on your machine. "
+            "no account, no cloud, no bullshit."
+        ))
+
         layout.addWidget(_gap(24))
+        layout.addWidget(_divider())
+        layout.addWidget(_gap(20))
 
         # ── What it does ──
-        layout.addWidget(_h("what it does", 16, C.GREEN))
+        layout.addWidget(_h("what it does", 15, C.GREEN))
         layout.addWidget(_gap(10))
-
         features = [
-            ("replay buffer",     "last N seconds always rolling in ram. something happened? save it."),
+            ("replay buffer",     "last n seconds always rolling in ram. something happened? save it."),
             ("one button save",   "any mouse button you want. press it, clip saved."),
             ("game detection",    "sees when a game opens and switches capture automatically"),
-            ("watermarking",      "burns your tag into every clip via ffmpeg"),
+            ("watermarking",      "burns your tag into every clip. fully customizable — text, size, position, opacity. "
+                                  "one small 'mitten' credit stays in the corner. that's the whole business model."),
             ("basically no overhead", "gpu-screen-recorder uses your hardware encoder so cpu barely moves"),
-            ("wayland",           "built for wayland, not an afterthought"),
+            ("wayland native",    "built for wayland, not ported to it"),
         ]
         for title, desc in features:
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(10)
-            dot = QLabel("▸")
+            dot = QLabel("\u25b8")
             dot.setFixedWidth(14)
             dot.setStyleSheet(f"color: {C.LAVENDER}; font-size: 13px; background: transparent;")
             row.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
             txt = _p(f"<b>{title}</b>  {desc}")
             row.addWidget(txt, 1)
             layout.addLayout(row)
-            layout.addWidget(_gap(6))
+            layout.addWidget(_gap(4))
 
-        layout.addWidget(_gap(28))
-        layout.addWidget(_divider())
         layout.addWidget(_gap(24))
-
-        # ── Performance comparison ──
-        layout.addWidget(_h("vs medal", 16, C.PINK))
-        layout.addWidget(_gap(10))
-        layout.addWidget(_p(
-            "from a real post on r/MedalTV (RTX 3090, i9-13700F, 32GB DDR5, "
-            "720p 60fps replay buffer):"
-        ))
-        layout.addWidget(_gap(8))
-
-        # Quote block
-        quote = QFrame()
-        quote.setStyleSheet(
-            f"background-color: rgba(37,35,54,0.5);"
-            f"border-left: 3px solid {C.PINK};"
-            f"border-radius: 0 6px 6px 0;"
-        )
-        ql = QVBoxLayout(quote)
-        ql.setContentsMargins(14, 10, 14, 10)
-        ql.setSpacing(4)
-        ql.addWidget(_p(
-            "\"when idling at desktop, medal is using around 600 MB of memory and 0% gpu. "
-            "when gaming, medal is using around 1000 MB of memory and around 25% of my gpu. "
-            "i'm only running 720p at 60fps and not doing full session recording.\"",
-            C.SUBTEXT, 12,
-        ))
-        ql.addWidget(_p("— r/MedalTV", C.GRAY, 10))
-        layout.addWidget(quote)
-
-        layout.addWidget(_gap(10))
-        layout.addWidget(_p(
-            "25% GPU on a 3090 for a 720p replay buffer is the dedicated CUDA shader cores "
-            "doing software work. mitten uses gpu-screen-recorder which hits the NVENC "
-            "hardware encoder block directly. that block sits idle during normal gaming "
-            "and barely registers on any GPU meter when recording."
-        ))
-        layout.addWidget(_gap(8))
-        layout.addWidget(_p(
-            "RAM wise, mitten's buffer scales with your buffer length and resolution. "
-            "a 30 second 1080p60 buffer in HEVC typically sits under 300MB. "
-            "the daemon itself is a few MB of Python.",
-            C.SUBTEXT, 12,
-        ))
-        layout.addWidget(_gap(6))
-        layout.addWidget(_p(
-            "note: these are user-reported numbers, not a controlled benchmark. "
-            "your mileage will vary.",
-            C.GRAY, 11,
-        ))
-
-        layout.addWidget(_gap(28))
-        layout.addWidget(_divider())
-        layout.addWidget(_gap(24))
-
-        # ── Stack ──
-        layout.addWidget(_h("built with", 16, C.ORANGE))
-        layout.addWidget(_gap(10))
-        layout.addWidget(_p(
-            "gpu-screen-recorder  ·  ffmpeg  ·  python  ·  pyqt6  ·  evdev  ·  pipewire"
-        ))
-
-        layout.addWidget(_gap(28))
         layout.addWidget(_divider())
         layout.addWidget(_gap(20))
 
-        layout.addWidget(_p("made with ♥ by mit", C.SUBTEXT, 11))
+        # ── vs medal carousel ──
+        layout.addWidget(_h("vs medal", 15, C.PINK))
+        layout.addWidget(_gap(10))
+        layout.addWidget(_ReviewSlider())
+
+        layout.addWidget(_gap(24))
+        layout.addWidget(_divider())
+        layout.addWidget(_gap(20))
+
+        # ── Built with pills ──
+        layout.addWidget(_h("built with", 15, C.ORANGE))
+        layout.addWidget(_gap(12))
+        pills_row = QHBoxLayout()
+        pills_row.setContentsMargins(0, 0, 0, 0)
+        pills_row.setSpacing(8)
+        pills_data = [
+            ("gpu-screen-recorder", C.GREEN,
+             "powers the replay buffer, uses your gpu's hardware encoder (nvenc) so cpu barely moves"),
+            ("ffmpeg", C.ORANGE,
+             "does all post-processing, watermarking, compression, and clip trimming"),
+            ("python", C.BLUE,
+             "the whole app runs here, daemon, gui, trigger listener, save pipeline, everything"),
+            ("pyqt6", C.LAVENDER,
+             "the gui framework, draws every window, button, animation, and overlay"),
+            ("evdev", C.PINK,
+             "reads raw mouse input from the kernel so mitten can detect your trigger button"),
+            ("pipewire", C.BLUE,
+             "audio capture, records system audio alongside the video in the buffer"),
+        ]
+        for label, color, tip in pills_data:
+            p = _pill(label, color)
+            p.setToolTip(tip)
+            pills_row.addWidget(p)
+        pills_row.addStretch()
+        layout.addLayout(pills_row)
+
+        layout.addWidget(_gap(24))
+        layout.addWidget(_divider())
+        layout.addWidget(_gap(20))
+
+        # ── Changelog ──
+        _GITHUB = "https://github.com/mitmitmitmitmitmit/mitten"
+        _COMMIT = _GITHUB + "/commit/{}"
+
+        # header row: "changelog" + "full history →" link aligned right
+        ch_row = QHBoxLayout()
+        ch_row.setContentsMargins(0, 0, 0, 0)
+        ch_row.setSpacing(8)
+        ch_row.addWidget(_h("changelog", 15, C.SUBTEXT))
+        hist_lbl = QLabel(f'<a href="{_GITHUB}/commits/main">full history →</a>')
+        hist_lbl.setOpenExternalLinks(True)
+        hist_lbl.setStyleSheet(
+            f"color: {C.SUBTEXT}; font-size: 11px; background: transparent;"
+        )
+        hist_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        ch_row.addWidget(hist_lbl, 1)
+        layout.addLayout(ch_row)
+        layout.addWidget(_gap(10))
+
+        # (version, short_hash, notes, is_hotfix)
+        _changelog_entries = [
+            ("0.2.25",   "0000000", "about page polish, README cleanup, copy pass", False),
+            ("0.2.24",   "fac86b6", "discord rich presence, dead code cleanup", False),
+            ("0.2.23.1", "15fe242", "README rewrite, dialog title fix, ui text cleanup", True),
+            ("0.2.23",   "01a3ef5", "adaptive cat system, nav look-around, clips vibe cycle", False),
+            ("0.2.22",   "4169948", "triple-click session recording", False),
+            ("0.2.21",   "dd26855", "restart dialog fix", True),
+            ("0.2.20.9", "f9217ab", "adaptive cats, wink system, light mode crash fixes", True),
+            ("0.2.20.8", "8335970", "shame watermark, audio device dropdown, review slider", True),
+            ("0.2.19.1", "d11ea99", "light mode abuse sounds, hint label fixes", True),
+            ("0.2.19",   "00e622c", "dev mode, theme overhaul, sounds, CQ slider, dual codec", False),
+        ]
+        # Light mode: replace one hotfix description with abuse
+        try:
+            from . import themes as _themes_mod
+            if _themes_mod.LIGHT_MODE_ACTIVE:
+                _hotfix_idxs = [i for i, e in enumerate(_changelog_entries) if e[3]]
+                if _hotfix_idxs:
+                    _target = random.choice(_hotfix_idxs)
+                    _v, _h, _n, _hf = _changelog_entries[_target]
+                    _changelog_entries[_target] = (_v, _h, _themes_mod.get_abuse(include_name=False), _hf)
+        except Exception:
+            pass
+        for ver, commit_hash, notes, is_hotfix in _changelog_entries:
+            row = QHBoxLayout()
+            indent = 18 if is_hotfix else 0
+            row.setContentsMargins(indent, 0, 0, 0)
+            row.setSpacing(14)
+            ver_color = _accent_rgba(0.55) if is_hotfix else C.LAVENDER
+            ver_size = 10 if is_hotfix else 11
+            v_lbl = QLabel(
+                f'<a href="{_COMMIT.format(commit_hash)}" '
+                f'style="color:{ver_color}; font-size:{ver_size}px; font-weight:600; '
+                f'text-decoration:none;">{ver}</a>'
+            )
+            v_lbl.setOpenExternalLinks(True)
+            v_lbl.setFixedWidth(70)
+            v_lbl.setStyleSheet("background: transparent;")
+            n_lbl = QLabel(notes)
+            n_lbl.setWordWrap(True)
+            note_size = 10 if is_hotfix else 11
+            n_lbl.setStyleSheet(
+                f"color: {C.SUBTEXT}; font-size: {note_size}px; background: transparent;"
+            )
+            row.addWidget(v_lbl)
+            row.addWidget(n_lbl, 1)
+            layout.addLayout(row)
+            layout.addWidget(_gap(3 if is_hotfix else 5))
+
+        layout.addWidget(_gap(24))
+        layout.addWidget(_divider())
+        layout.addWidget(_gap(20))
+
+        # ── GitHub link ──
+        gh_lbl = QLabel(f'<a href="{_GITHUB}">view source on github</a>')
+        gh_lbl.setOpenExternalLinks(True)
+        gh_lbl.setStyleSheet(
+            f"color: {C.LAVENDER}; font-size: 12px; background: transparent;"
+            f"text-decoration: none;"
+        )
+        layout.addWidget(gh_lbl)
+
+        layout.addWidget(_gap(16))
+        layout.addWidget(_SysInfoSection())
+
+        layout.addWidget(_gap(20))
+        layout.addWidget(_p("made with \u2665 by mit", C.SUBTEXT, 11))
         layout.addStretch()
 
         wrapper = QWidget()
@@ -717,6 +1403,541 @@ class _AboutPage(QWidget):
         scroll.setWidget(wrapper)
 
         outer.addWidget(scroll)
+
+
+
+# ------------------------------------------------------------------ #
+# Debug page (developer mode)
+# ------------------------------------------------------------------ #
+
+class _DebugPage(QWidget):
+    """Developer debug panel — test notifications, system info, log viewer, extra tools."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+
+        inner = QWidget()
+        inner.setMaximumWidth(820)
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(40, 36, 40, 40)
+        layout.setSpacing(0)
+
+        # ─── local builder helpers (same visual language as _AboutPage) ─── #
+
+        def _h(text: str, size: int = 15, color: str = C.LAVENDER) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet(
+                f"color: {color}; font-size: {size}px; font-weight: 700;"
+                f"background: transparent; {CAT_FONT}"
+            )
+            return lbl
+
+        def _sub(text: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet(
+                f"color: {C.SUBTEXT}; font-size: 12px; background: transparent;"
+            )
+            return lbl
+
+        def _gap(px: int = 14) -> QWidget:
+            w = QWidget()
+            w.setFixedHeight(px)
+            w.setStyleSheet("background: transparent;")
+            return w
+
+        def _divider() -> QWidget:
+            line = QWidget()
+            line.setFixedHeight(1)
+            line.setStyleSheet(f"background-color: {_hex_rgba(C.BORDER, 0.4)};")
+            return line
+
+        def _sep(label: str) -> QWidget:
+            """Uppercase section header + horizontal rule, matching about page style."""
+            w = QWidget()
+            w.setStyleSheet("background: transparent;")
+            row = QHBoxLayout(w)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(10)
+            lbl = QLabel(label)
+            lbl.setStyleSheet(
+                f"color: {C.SUBTEXT}; font-size: 10px; font-weight: 700;"
+                f"letter-spacing: 1.5px; background: transparent;"
+            )
+            row.addWidget(lbl)
+            rule = QWidget()
+            rule.setFixedHeight(1)
+            rule.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            rule.setStyleSheet(f"background-color: {_hex_rgba(C.BORDER, 0.4)};")
+            row.addWidget(rule, 1)
+            return w
+
+        def _card_frame(danger: bool = False) -> tuple[QFrame, QHBoxLayout]:
+            """Surface card — C.SURFACE background, C.BORDER border, 8px radius."""
+            border = C.BORDER if not danger else _hex_rgba(C.PINK, 0.35)
+            frame = QFrame()
+            frame.setStyleSheet(
+                f"QFrame {{ background: {C.SURFACE}; border-radius: 8px;"
+                f"border: 1px solid {border}; }}"
+            )
+            fl = QHBoxLayout(frame)
+            fl.setContentsMargins(16, 12, 16, 12)
+            fl.setSpacing(12)
+            return frame, fl
+
+        def _action_row(
+            desc: str,
+            btn_text: str,
+            slot,
+            *,
+            danger: bool = False,
+            warn_text: str = "",
+        ) -> QFrame:
+            """Card row: description (+ optional warning) on left, button on right."""
+            frame, fl = _card_frame(danger=danger)
+            col = QVBoxLayout()
+            col.setSpacing(2)
+            dl = QLabel(desc)
+            dl.setStyleSheet(
+                f"color: {C.TEXT}; font-size: 12px; background: transparent; border: none;"
+            )
+            dl.setWordWrap(True)
+            col.addWidget(dl)
+            if warn_text:
+                wl = QLabel(warn_text)
+                wl.setStyleSheet(
+                    f"color: {C.PINK}; font-size: 10px; background: transparent; border: none;"
+                )
+                col.addWidget(wl)
+            fl.addLayout(col, 1)
+            btn = QPushButton(btn_text)
+            if danger:
+                btn.setStyleSheet(
+                    f"QPushButton {{ background-color: {C.PINK}; color: {C.BG};"
+                    f" border: none; border-radius: 6px; padding: 6px 16px; font-weight: 600; }}"
+                    f"QPushButton:hover {{ background-color: {_hex_rgba(C.PINK, 0.8)}; }}"
+                    f"QPushButton:pressed {{ background-color: {_hex_rgba(C.PINK, 0.6)}; }}"
+                )
+            else:
+                btn.setProperty("class", "secondary")
+            btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(slot)
+            fl.addWidget(btn)
+            return frame
+
+        def _stat_cell(title: str) -> tuple[QWidget, QLabel]:
+            """Stat cell with bold value + small label — for metrics grid."""
+            cell = QWidget()
+            cell.setStyleSheet(
+                f"background: {C.OVERLAY}; border-radius: 6px; border: 1px solid {C.BORDER};"
+            )
+            cl = QVBoxLayout(cell)
+            cl.setContentsMargins(12, 10, 12, 10)
+            cl.setSpacing(3)
+            val_lbl = QLabel("—")
+            val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            val_lbl.setStyleSheet(
+                f"color: {C.TEXT}; font-size: 18px; font-weight: bold;"
+                f"background: transparent; border: none;"
+            )
+            tl = QLabel(title)
+            tl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            tl.setStyleSheet(
+                f"color: {C.SUBTEXT}; font-size: 10px; background: transparent; border: none;"
+            )
+            cl.addWidget(val_lbl)
+            cl.addWidget(tl)
+            return cell, val_lbl
+
+        def _kv_row(card_layout: QVBoxLayout, key: str) -> QLabel:
+            """Monospace key → value row inside a card. Returns the value label."""
+            row_w = QWidget()
+            row_w.setStyleSheet("background: transparent;")
+            rl = QHBoxLayout(row_w)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(8)
+            k = QLabel(key)
+            k.setStyleSheet(
+                f"color: {C.SUBTEXT}; font-size: 11px; font-family: monospace;"
+                f"background: transparent; border: none;"
+            )
+            v = QLabel("—")
+            v.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            v.setStyleSheet(
+                f"color: {C.TEXT}; font-size: 11px; font-family: monospace;"
+                f"background: transparent; border: none;"
+            )
+            rl.addWidget(k, 1)
+            rl.addWidget(v)
+            card_layout.addWidget(row_w)
+            return v
+
+        # ── Page header ─────────────────────────────────────────────── #
+        layout.addWidget(_h("debug panel", 18, C.LAVENDER))
+        layout.addWidget(_gap(4))
+        layout.addWidget(_sub("developer tools — only shown when developer_mode is enabled"))
+        layout.addWidget(_gap(22))
+        layout.addWidget(_divider())
+        layout.addWidget(_gap(20))
+
+        # ── DAEMON STATUS ────────────────────────────────────────────── #
+        layout.addWidget(_sep("DAEMON STATUS"))
+        layout.addWidget(_gap(10))
+
+        status_frame = QFrame()
+        status_frame.setStyleSheet(
+            f"QFrame {{ background: {C.SURFACE}; border-radius: 8px;"
+            f"border: 1px solid {C.BORDER}; }}"
+        )
+        status_body = QVBoxLayout(status_frame)
+        status_body.setContentsMargins(16, 12, 16, 12)
+        status_body.setSpacing(6)
+        self._lbl_recorder_pid   = _kv_row(status_body, "recorder pid")
+        self._lbl_socket_status  = _kv_row(status_body, "gui socket")
+        layout.addWidget(status_frame)
+
+        layout.addWidget(_gap(24))
+        layout.addWidget(_divider())
+        layout.addWidget(_gap(20))
+
+        # ── TESTING ─────────────────────────────────────────────────── #
+        layout.addWidget(_sep("TESTING"))
+        layout.addWidget(_gap(10))
+        layout.addWidget(_action_row(
+            "Send a test desktop notification",
+            "Test notification",
+            self._test_notification,
+        ))
+        layout.addWidget(_gap(8))
+        layout.addWidget(_action_row(
+            "Force-save a clip now — sends SIGUSR1 to the recorder (same as the trigger button)",
+            "Force save clip now",
+            self._force_save,
+        ))
+
+        layout.addWidget(_gap(24))
+        layout.addWidget(_divider())
+        layout.addWidget(_gap(20))
+
+        # ── CLIP METRICS ─────────────────────────────────────────────── #
+        layout.addWidget(_sep("CLIP METRICS"))
+        layout.addWidget(_gap(10))
+
+        metrics_grid_row = QHBoxLayout()
+        metrics_grid_row.setSpacing(8)
+        cell_clips, self._metric_clips = _stat_cell("total clips")
+        cell_avg,   self._metric_avg   = _stat_cell("avg save time")
+        cell_size,  self._metric_size  = _stat_cell("total size saved")
+        cell_comp,  self._metric_comp  = _stat_cell("compression rate")
+        for cell in (cell_clips, cell_avg, cell_size, cell_comp):
+            metrics_grid_row.addWidget(cell)
+        layout.addLayout(metrics_grid_row)
+
+        layout.addWidget(_gap(24))
+        layout.addWidget(_divider())
+        layout.addWidget(_gap(20))
+
+        # ── SYSTEM DETECTION ────────────────────────────────────────── #
+        layout.addWidget(_sep("SYSTEM DETECTION"))
+        layout.addWidget(_gap(10))
+
+        self._sys_info = QLabel("loading\u2026")
+        self._sys_info.setWordWrap(True)
+        self._sys_info.setStyleSheet(
+            f"QLabel {{ color: {C.TEXT}; font-size: 11px; font-family: monospace;"
+            f"background: {C.SURFACE}; border-radius: 6px;"
+            f"border: 1px solid {C.BORDER}; padding: 12px; }}"
+        )
+        layout.addWidget(self._sys_info)
+        self._populate_sys_info()
+
+        layout.addWidget(_gap(24))
+        layout.addWidget(_divider())
+        layout.addWidget(_gap(20))
+
+        # ── FILE ACTIONS ─────────────────────────────────────────────── #
+        layout.addWidget(_sep("FILE ACTIONS"))
+        layout.addWidget(_gap(10))
+        layout.addWidget(_action_row(
+            "Open config file in default editor",
+            "Open config file",
+            self._open_config,
+        ))
+        layout.addWidget(_gap(8))
+        layout.addWidget(_action_row(
+            "Open clips folder in file manager",
+            "Open clips folder",
+            self._open_clips,
+        ))
+        layout.addWidget(_gap(24))
+        layout.addWidget(_divider())
+        layout.addWidget(_gap(20))
+
+        # ── DANGER ZONE ──────────────────────────────────────────────── #
+        layout.addWidget(_sep("DANGER ZONE"))
+        layout.addWidget(_gap(10))
+        layout.addWidget(_action_row(
+            "Clear replay buffer",
+            "Clear buffer",
+            self._clear_buffer,
+            danger=True,
+            warn_text="warning: current footage will be lost",
+        ))
+
+        layout.addWidget(_gap(24))
+        layout.addWidget(_divider())
+        layout.addWidget(_gap(20))
+
+        # ── DAEMON LOG ───────────────────────────────────────────────── #
+        log_hdr_row = QHBoxLayout()
+        log_hdr_row.setContentsMargins(0, 0, 0, 0)
+        log_hdr_row.setSpacing(10)
+        log_hdr_row.addWidget(_sep("DAEMON LOG"), 1)
+        btn_refresh_log = QPushButton("Refresh")
+        btn_refresh_log.setProperty("class", "secondary")
+        btn_refresh_log.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        btn_refresh_log.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_refresh_log.clicked.connect(self._refresh_log)
+        log_hdr_row.addWidget(btn_refresh_log)
+        layout.addLayout(log_hdr_row)
+        layout.addWidget(_gap(10))
+
+        self._log_view = QPlainTextEdit()
+        self._log_view.setReadOnly(True)
+        self._log_view.setMinimumHeight(240)
+        self._log_view.setStyleSheet(
+            f"QPlainTextEdit {{ background: {C.BG}; color: {C.TEXT};"
+            f"font-family: monospace; font-size: 11px;"
+            f"border: 1px solid {C.BORDER}; border-radius: 6px; padding: 8px; }}"
+        )
+        layout.addWidget(self._log_view, 1)
+
+        layout.addStretch()
+
+        wrapper = QWidget()
+        wl = QHBoxLayout(wrapper)
+        wl.setContentsMargins(0, 0, 0, 0)
+        wl.addStretch()
+        wl.addWidget(inner)
+        wl.addStretch()
+        scroll.setWidget(wrapper)
+
+        outer.addWidget(scroll)
+
+        # Auto-load log + status on first show
+        self._log_loaded = False
+
+    def _refresh_status(self) -> None:
+        """Update recorder PID and socket status labels."""
+        try:
+            pid = get_daemon_pid()
+            if pid:
+                try:
+                    comm = Path(f"/proc/{pid}/comm").read_text().strip()
+                    self._lbl_recorder_pid.setText(f"{pid}  ({comm})")
+                except OSError:
+                    self._lbl_recorder_pid.setText(str(pid))
+            else:
+                self._lbl_recorder_pid.setText("not running")
+        except Exception:
+            self._lbl_recorder_pid.setText("—")
+
+        try:
+            from ..config import GUI_SOCKET
+            import socket as _sock
+            if GUI_SOCKET.exists():
+                try:
+                    s = _sock.socket(_sock.AF_UNIX, _sock.SOCK_STREAM)
+                    s.settimeout(0.5)
+                    s.connect(str(GUI_SOCKET))
+                    s.close()
+                    self._lbl_socket_status.setText("alive")
+                except Exception:
+                    self._lbl_socket_status.setText("stale file")
+            else:
+                self._lbl_socket_status.setText("not found")
+        except Exception:
+            self._lbl_socket_status.setText("—")
+
+    def _refresh_metrics(self) -> None:
+        """Load and display clip metrics."""
+        try:
+            from ..metrics import load_metrics, avg_save_time, compression_rate
+            clips = load_metrics()
+            n = len(clips)
+            self._metric_clips.setText(str(n) if n else "0")
+            if clips:
+                avg = avg_save_time()
+                self._metric_avg.setText(f"{avg:.1f}s" if avg is not None else "—")
+                total_mb = sum(m.final_size_mb for m in clips)
+                self._metric_size.setText(f"{total_mb:.1f} MB")
+                comp = compression_rate()
+                self._metric_comp.setText(f"{comp * 100:.0f}%" if comp is not None else "—")
+            else:
+                self._metric_avg.setText("—")
+                self._metric_size.setText("—")
+                self._metric_comp.setText("—")
+        except Exception:
+            self._metric_clips.setText("—")
+            self._metric_avg.setText("—")
+            self._metric_size.setText("—")
+            self._metric_comp.setText("—")
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._log_loaded:
+            self._refresh_log()
+            self._log_loaded = True
+        self._refresh_status()
+        self._refresh_metrics()
+
+    def _test_notification(self) -> None:
+        try:
+            from ..notify import notify
+            notify(
+                "mitten debug test",
+                "this is a test notification from the debug panel",
+            )
+        except Exception as exc:
+            self._log_view.appendPlainText(f"[notification error] {exc}")
+
+    def _force_save(self) -> None:
+        """Send SIGUSR1 to the recorder PID to trigger a clip save."""
+        try:
+            import os, signal as _signal
+            pid = get_daemon_pid()
+            if pid is None:
+                self._log_view.appendPlainText("[force save] daemon is not running")
+                return
+            os.kill(pid, _signal.SIGUSR1)
+            self._log_view.appendPlainText(f"[force save] SIGUSR1 sent to PID {pid}")
+        except Exception as exc:
+            self._log_view.appendPlainText(f"[force save error] {exc}")
+
+    def _open_config(self) -> None:
+        from ..config import CONFIG_FILE
+        subprocess.Popen(["xdg-open", str(CONFIG_FILE)],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _open_clips(self) -> None:
+        try:
+            from ..config import load_config
+            clips_dir = load_config().general.save_dir
+        except Exception:
+            clips_dir = Path.home() / "Videos" / "mitten"
+        clips_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen(["xdg-open", str(clips_dir)],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _reload_theme(self) -> None:
+        try:
+            from .themes import apply_theme, LIGHT_MODE_ACTIVE
+            from ..config import load_config
+            from .resources import make_stylesheet
+            from PyQt6.QtWidgets import QApplication
+            theme = load_config().general.theme
+            apply_theme(theme)
+            app = QApplication.instance()
+            if app:
+                app.setStyleSheet(make_stylesheet())
+            self._log_view.appendPlainText(f"[reload theme] applied theme '{theme}'")
+        except Exception as exc:
+            self._log_view.appendPlainText(f"[reload theme error] {exc}")
+
+    def _populate_sys_info(self) -> None:
+        import os as _os
+        lines: list[str] = []
+
+        # GPU + VRAM
+        try:
+            r = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name,memory.total,memory.used",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                parts = [p.strip() for p in r.stdout.strip().split(",")]
+                lines.append(f"gpu       {parts[0]}")
+                if len(parts) >= 3:
+                    lines.append(f"vram      {parts[2]} / {parts[1]} MiB used/total")
+        except Exception:
+            lines.append("gpu       (nvidia-smi not available)")
+
+        # CPU
+        try:
+            for line in Path("/proc/cpuinfo").read_text().splitlines():
+                if "model name" in line:
+                    cpu = line.split(":", 1)[1].strip()
+                    lines.append(f"cpu       {cpu}")
+                    break
+        except Exception:
+            lines.append("cpu       (unavailable)")
+
+        # RAM
+        try:
+            for line in Path("/proc/meminfo").read_text().splitlines():
+                if line.startswith("MemTotal:"):
+                    ram_kb = int(line.split()[1])
+                    lines.append(f"ram       {ram_kb // (1024 * 1024)} GB total")
+                    break
+        except Exception:
+            lines.append("ram       (unavailable)")
+
+        # Display server
+        display = _os.environ.get("WAYLAND_DISPLAY") or _os.environ.get("DISPLAY") or "unknown"
+        lines.append(f"display   {display}")
+
+        # gpu-screen-recorder version
+        try:
+            r = subprocess.run(
+                ["gpu-screen-recorder", "--version"],
+                capture_output=True, text=True, timeout=5,
+            )
+            ver = (r.stdout.strip() or r.stderr.strip()).split("\n")[0][:60] or "(no output)"
+            lines.append(f"gsr       {ver}")
+        except FileNotFoundError:
+            lines.append("gsr       not found")
+        except Exception as exc:
+            lines.append(f"gsr       error: {exc}")
+
+        self._sys_info.setText("\n".join(lines))
+
+    def _clear_buffer(self) -> None:
+        try:
+            import os, signal as _signal
+            pid = get_daemon_pid()
+            if pid is None:
+                self._log_view.appendPlainText("[clear buffer] daemon is not running")
+                return
+            # SIGUSR1 triggers a save/flush of the current buffer
+            os.kill(pid, _signal.SIGUSR1)
+            self._log_view.appendPlainText("[clear buffer] SIGUSR1 sent to daemon")
+        except Exception as exc:
+            self._log_view.appendPlainText(f"[clear buffer error] {exc}")
+
+    def _refresh_log(self) -> None:
+        try:
+            result = subprocess.run(
+                ["journalctl", "--user", "-u", "mitten", "-n", "100",
+                 "--no-pager", "--output=short"],
+                capture_output=True, text=True, timeout=10,
+            )
+            text = result.stdout.strip() or "(no log output)"
+        except Exception as exc:
+            text = f"(error reading journal: {exc})"
+        self._log_view.setPlainText(text)
+        # Scroll to bottom
+        sb = self._log_view.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
 
 # ------------------------------------------------------------------ #
@@ -734,6 +1955,7 @@ class MittenMainWindow(QMainWindow):
 
         self._state = "idle"
         self._last_clip_path: Path | None = None
+        self._schizo_tick: int = 0  # counts _refresh() calls; used for light-mode schizo effects
 
         # Cache deps check — gpu-screen-recorder presence, checked once on init
         try:
@@ -744,9 +1966,22 @@ class MittenMainWindow(QMainWindow):
 
         # Whether settings sub-nav is showing in the sidebar
         self._settings_nav_active = False
+        self._previous_page_idx: int = 0
+
+        # Animation registry — prevents stacking when animations are re-triggered
+        self._anims: dict[str, QPropertyAnimation] = {}
+        self._stagger_timers: list[QTimer] = []
 
         self._build_ui()
         self._connect_signals()
+
+        # Apply developer mode from config at startup (show/hide Debug nav button)
+        try:
+            from ..config import load_config
+            if load_config().general.developer_mode:
+                self._nav_debug.setVisible(True)
+        except Exception:
+            pass
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
@@ -756,7 +1991,34 @@ class MittenMainWindow(QMainWindow):
         self._save_flash.setSingleShot(True)
         self._save_flash.timeout.connect(self._refresh)
 
+        # Update checker — runs every 60s in background thread (git fetch is slow)
+        self._update_hashes: tuple[str, str] | None = None
+        self._update_checker: _UpdateCheckerThread | None = None
+        self._update_timer = QTimer(self)
+        self._update_timer.timeout.connect(self._run_update_check)
+        self._update_timer.start(60_000)
+        # Also run once 10s after launch (avoids slowing initial startup)
+        QTimer.singleShot(10_000, self._run_update_check)
+
         self._refresh()
+
+        # Wink timer — cat occasionally winks in dark mode (random 45-120s interval)
+        self._wink_timer = QTimer(self)
+        self._wink_timer.setSingleShot(True)
+        self._wink_timer.timeout.connect(self._do_wink)
+        self._wink_timer.start(self._next_wink_delay())
+
+        # Light mode torture timers — only fire if light mode is active at trigger time
+        # 30-minute fake "update required" dialog
+        self._lm_fake_update_timer = QTimer(self)
+        self._lm_fake_update_timer.setSingleShot(True)
+        self._lm_fake_update_timer.timeout.connect(self._show_fake_update_dialog)
+        try:
+            from . import themes as _t
+            if _t.LIGHT_MODE_ACTIVE:
+                self._lm_fake_update_timer.start(30 * 60 * 1000)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ #
     # UI construction
@@ -775,8 +2037,8 @@ class MittenMainWindow(QMainWindow):
         sidebar = QWidget()
         sidebar.setFixedWidth(140)
         sidebar.setStyleSheet(
-            f"background-color: rgba(22,20,34,0.97);"
-            f"border-right: 1px solid rgba(58,54,80,0.35);"
+            f"background-color: {_hex_rgba(C.BG, 0.97)};"
+            f"border-right: 1px solid {_hex_rgba(C.BORDER, 0.35)};"
         )
 
         self._sidebar_layout = QVBoxLayout(sidebar)
@@ -784,17 +2046,43 @@ class MittenMainWindow(QMainWindow):
         self._sidebar_layout.setSpacing(0)
 
         # Logo
-        logo = QLabel(f"  {CAT}")
+        try:
+            from . import themes as _themes_mod
+            _initial_cat = _themes_mod.get_light_mode_cat() if _themes_mod.LIGHT_MODE_ACTIVE else CAT
+        except Exception:
+            _initial_cat = CAT
+        logo = QLabel(_initial_cat)
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo.setStyleSheet(
             f"color: {C.LAVENDER}; font-size: 20px; font-weight: 700;"
-            f"padding: 6px 0 1px 10px; {CAT_FONT}"
+            f"padding: 6px 0 1px 0; {CAT_FONT}"
         )
+        try:
+            from . import themes as _themes_mod
+            if _themes_mod.LIGHT_MODE_ACTIVE:
+                logo.setToolTip(_themes_mod.get_abuse())
+        except Exception:
+            pass
+        self._logo_label = logo
+        self._logo_stage = 0
         self._sidebar_layout.addWidget(logo)
 
-        title = QLabel("  MITTEN")
+        # Progressive cat anger timer — checks every 60s in light mode
+        self._cat_stage_timer = QTimer(self)
+        self._cat_stage_timer.setInterval(60_000)
+        self._cat_stage_timer.timeout.connect(self._update_cat_stage)
+        try:
+            from . import themes as _themes_mod
+            if _themes_mod.LIGHT_MODE_ACTIVE:
+                self._cat_stage_timer.start()
+        except Exception:
+            pass
+
+        title = QLabel("MITTEN")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
-            f"color: rgba(232,224,240,0.7); font-size: 12px; font-weight: 700;"
-            f"letter-spacing: 4px; padding: 0 0 20px 10px;"
+            f"color: {_hex_rgba(C.TEXT, 0.7)}; font-size: 12px; font-weight: 700;"
+            f"letter-spacing: 4px; padding: 0 0 20px 0;"
         )
         self._sidebar_layout.addWidget(title)
 
@@ -803,12 +2091,27 @@ class MittenMainWindow(QMainWindow):
         self._nav_clips     = _NavButton("Clips")
         self._nav_settings  = _NavButton("Settings")
         self._nav_about     = _NavButton("About")
+        self._nav_debug     = _NavButton("Debug")
+        self._nav_debug.setVisible(False)  # hidden unless developer_mode is on
         self._nav_dashboard.setChecked(True)
         self._main_nav_buttons = [
             self._nav_dashboard, self._nav_clips, self._nav_settings, self._nav_about,
         ]
         for btn in self._main_nav_buttons:
             self._sidebar_layout.addWidget(btn)
+        self._sidebar_layout.addWidget(self._nav_debug)
+
+        # Light mode: randomly assign abuse tooltips to 2 nav buttons
+        try:
+            from . import themes as _themes_mod
+            if _themes_mod.LIGHT_MODE_ACTIVE:
+                _abuse_targets = random.sample(
+                    [self._nav_clips, self._nav_settings, self._nav_about], 2
+                )
+                for _btn in _abuse_targets:
+                    _btn.setToolTip(_themes_mod.get_abuse())
+        except Exception:
+            pass
 
         # Settings sub-nav (hidden by default)
         self._nav_back = _NavButton("\u2190  Back")
@@ -827,19 +2130,47 @@ class MittenMainWindow(QMainWindow):
 
         try:
             from .. import __version__
-            ver = __version__
+            self._current_ver = __version__
         except Exception:
-            ver = "?"
-        ver_label = QLabel(f"  mitten  v{ver}")
-        ver_label.setStyleSheet(
-            f"color: rgba(152,144,168,0.45); font-size: 10px; font-weight: 600;"
-            f"letter-spacing: 0.5px; padding-left: 10px; padding-bottom: 2px;"
+            self._current_ver = "?"
+
+        # Normal version label — hidden when update is available
+        self._ver_label = QLabel(f"mitten  v{self._current_ver}")
+        self._ver_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._ver_label.setStyleSheet(
+            f"color: {_hex_rgba(C.SUBTEXT, 0.45)}; font-size: 10px; font-weight: 600;"
+            f"letter-spacing: 0.5px; padding-bottom: 2px;"
         )
-        made_label = QLabel("  made with ♥ by mit")
+
+        # Update-available row: old (red) → arrow → new (green)
+        self._ver_update_widget = QWidget()
+        self._ver_update_widget.setStyleSheet("background: transparent;")
+        _vu_layout = QVBoxLayout(self._ver_update_widget)
+        _vu_layout.setContentsMargins(8, 0, 8, 2)
+        _vu_layout.setSpacing(2)
+
+        self._ver_row_label = QLabel()  # set dynamically: "v{old} → v{new}"
+        self._ver_row_label.setStyleSheet("background: transparent;")
+
+        self._ver_warning_label = QLabel("⚠ not meant to be non-updateable")
+        self._ver_warning_label.setWordWrap(True)
+        self._ver_warning_label.setStyleSheet(
+            f"color: {_hex_rgba(C.ORANGE, 0.7)}; font-size: 8px;"
+            f"padding-left: 0px; background: transparent;"
+        )
+
+        _vu_layout.addWidget(self._ver_row_label)
+        _vu_layout.addWidget(self._ver_warning_label)
+        self._ver_update_widget.hide()
+
+        made_label = QLabel("made with ♥ by mit")
+        made_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        made_label.setWordWrap(True)
         made_label.setStyleSheet(
-            f"color: rgba(152,144,168,0.28); font-size: 9px; padding-left: 10px; padding-bottom: 4px;"
+            f"color: {_hex_rgba(C.SUBTEXT, 0.28)}; font-size: 9px; padding: 0 8px 6px 8px;"
         )
-        self._sidebar_layout.addWidget(ver_label)
+        self._sidebar_layout.addWidget(self._ver_label)
+        self._sidebar_layout.addWidget(self._ver_update_widget)
         self._sidebar_layout.addWidget(made_label)
 
         root.addWidget(sidebar)
@@ -862,18 +2193,136 @@ class MittenMainWindow(QMainWindow):
         self._about_page = _AboutPage()
         self._pages.addWidget(self._about_page)     # index 3
 
+        self._debug_page = _DebugPage()
+        self._pages.addWidget(self._debug_page)     # index 4
+
         root.addWidget(self._pages, 1)
 
     # ------------------------------------------------------------------ #
     # Signal wiring
     # ------------------------------------------------------------------ #
 
+    def _next_wink_delay(self) -> int:
+        import random as _r
+        return _r.randint(45_000, 120_000)
+
+    def _do_wink(self) -> None:
+        """Briefly swap the sidebar cat to a winking variant, then restore. Dark mode only."""
+        try:
+            from . import themes as _t
+            if _t.LIGHT_MODE_ACTIVE:
+                self._wink_timer.start(self._next_wink_delay())
+                return
+            # Don't interrupt the clips vibe cycle
+            if self._pages.currentIndex() == 1 and self._clips_page._is_vibing:
+                self._wink_timer.start(self._next_wink_delay())
+                return
+            import random as _r
+            wink = _r.choice([_t.DARK_CAT_WINK, _t.DARK_CAT_WINK2])
+            self._logo_label.setText(wink)
+            # Meow ~30% of the time
+            if _r.random() < 0.30:
+                _t.play_dark_meow()
+            # Restore to page-appropriate cat after 400ms
+            page = self._pages.currentIndex()
+            QTimer.singleShot(400, lambda: self._logo_label.setText(
+                _t.get_page_cat(page, app_state=self._state)
+            ))
+        except Exception:
+            pass
+        self._wink_timer.start(self._next_wink_delay())
+
+    def _show_fake_update_dialog(self) -> None:
+        """30-minute light mode punishment: fake update required dialog."""
+        try:
+            from . import themes as _t
+            if not _t.LIGHT_MODE_ACTIVE:
+                return
+        except Exception:
+            return
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Update Required")
+        dlg.setFixedWidth(420)
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        title = QLabel("MITTEN Update Required")
+        title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        layout.addWidget(title)
+        notes = QLabel(
+            "v0.2.21 — Critical patch available\n\n"
+            "• Dark Mode Performance Improvements (+40% fps)\n"
+            "• Light Mode Stability Issues Fixed (there are many)\n"
+            "• Memory leak patched (light mode only, obviously)\n"
+            "• Addressed user taste regression introduced in v0.2.20\n\n"
+            "Update required to continue. switch to dark mode freak."
+        )
+        notes.setWordWrap(True)
+        notes.setStyleSheet("font-size: 12px;")
+        layout.addWidget(notes)
+        btn_row = QHBoxLayout()
+        btn_later = QPushButton("Remind Me Later")
+        btn_later.clicked.connect(dlg.accept)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_later)
+        layout.addLayout(btn_row)
+        dlg.exec()
+
+    def _update_cat_stage(self) -> None:
+        """Check if light mode anger stage has advanced; update logo + play meow."""
+        try:
+            from . import themes as _t
+            if not _t.LIGHT_MODE_ACTIVE:
+                self._cat_stage_timer.stop()
+                return
+            stage = _t.get_light_mode_stage()
+            if stage != self._logo_stage:
+                self._logo_stage = stage
+                self._logo_label.setText(_t.get_light_mode_cat())
+                _t.play_stage_meow()
+        except Exception:
+            pass
+
+    def _on_clip_cat_state(self, state: str) -> None:
+        """Clips page emitted a cat state — update sidebar logo if we're on the clips page."""
+        if self._pages.currentIndex() != 1:
+            return
+        try:
+            from . import themes as _t
+            self._logo_label.setText(_t.get_state_cat(state))
+        except Exception:
+            pass
+
+    def _do_nav_look(self, direction: str, dest_page: int) -> None:
+        """Flash a look-left/right cat on the sidebar logo for ~450ms, then settle on
+        the destination page cat. Gives the feeling of the cat glancing toward the new page."""
+        try:
+            from . import themes as _t
+            look_cat = _t.get_look_cat(direction)
+            self._logo_label.setText(look_cat)
+
+            def _settle() -> None:
+                # Don't clobber if clips page is driving the cat (vibing)
+                if dest_page == 1 and self._clips_page._is_vibing:
+                    return
+                page_cat = _t.get_page_cat(dest_page, app_state=self._state)
+                self._logo_label.setText(page_cat)
+
+            QTimer.singleShot(450, _settle)
+        except Exception:
+            pass
+
     def _connect_signals(self) -> None:
         self._nav_dashboard.clicked.connect(lambda: self._switch_main_page(0))
         self._nav_clips.clicked.connect(lambda: self._switch_main_page(1))
         self._nav_settings.clicked.connect(self._enter_settings)
         self._nav_about.clicked.connect(lambda: self._switch_main_page(3))
+        self._nav_debug.clicked.connect(lambda: self._switch_main_page(4))
         self._nav_back.clicked.connect(self._exit_settings)
+
+        # Clips page cat signal → sidebar logo sync
+        self._clips_page.cat_state_changed.connect(self._on_clip_cat_state)
 
         for i, btn in enumerate(self._settings_nav_buttons):
             btn.clicked.connect(lambda _, idx=i: self._switch_settings_section(idx))
@@ -882,10 +2331,29 @@ class MittenMainWindow(QMainWindow):
         btn.clicked.connect(self._toggle_recording)
         btn.pressed.connect(lambda: self._btn_press_dip(btn))
 
+        self._dashboard.banner._btn_update.clicked.connect(self._do_update)
+
+        pause_btn = self._dashboard.banner._btn_pause
+        pause_btn.clicked.connect(self._toggle_pause)
+        pause_btn.pressed.connect(lambda: self._btn_press_dip(pause_btn))
+
+        # Developer mode toggle from settings (no restart required)
+        self._settings_page.developer_mode_toggled.connect(self._on_dev_mode_toggled)
+
+    def _start_anim(self, key: str, anim: QPropertyAnimation) -> None:
+        """Stop any existing animation at this key, register and start the new one."""
+        old = self._anims.get(key)
+        if old and old.state() == QPropertyAnimation.State.Running:
+            old.stop()
+        self._anims[key] = anim
+        if anim.state() != QPropertyAnimation.State.Running:
+            anim.start()
+
     def _btn_press_dip(self, btn: QPushButton) -> None:
         """Brief opacity dip on button press."""
         from .anim import fade_out, fade_in
-        fade_out(btn, duration_ms=50, on_done=lambda: fade_in(btn, duration_ms=100))
+        anim = fade_out(btn, duration_ms=50, on_done=lambda: fade_in(btn, duration_ms=100))
+        self._start_anim(f"btn_dip_{id(btn)}", anim)
 
     # ------------------------------------------------------------------ #
     # Navigation
@@ -894,12 +2362,18 @@ class MittenMainWindow(QMainWindow):
     def _switch_main_page(self, index: int) -> None:
         if self._pages.currentIndex() == index:
             return
+        prev_index = self._pages.currentIndex()
+        direction = "right" if index > prev_index else "left"
+        self._do_nav_look(direction, dest_page=index)
         self._fade_to(index)
         for i, btn in enumerate(self._main_nav_buttons):
             btn.setChecked(i == index)
+        # Debug button (index 4) is outside _main_nav_buttons
+        self._nav_debug.setChecked(index == 4)
 
     def _enter_settings(self) -> None:
         """Fade sidebar from main nav to settings sub-nav."""
+        self._previous_page_idx = self._pages.currentIndex()
         self._settings_nav_active = True
         self._fade_sidebar(show_settings=True)
         self._fade_to(2)
@@ -910,33 +2384,50 @@ class MittenMainWindow(QMainWindow):
         """Return from settings sub-nav to main nav."""
         self._settings_nav_active = False
         self._fade_sidebar(show_settings=False)
-        self._fade_to(0)
-        for btn in self._main_nav_buttons:
-            btn.setChecked(False)
-        self._nav_dashboard.setChecked(True)
+        self._fade_to(self._previous_page_idx)
+        for i, btn in enumerate(self._main_nav_buttons):
+            btn.setChecked(i == self._previous_page_idx)
+        # Restore logo for destination page
+        try:
+            from . import themes as _t
+            self._logo_label.setText(_t.get_page_cat(self._previous_page_idx, app_state=self._state))
+        except Exception:
+            pass
 
     def _fade_sidebar(self, show_settings: bool) -> None:
         from .anim import staggered_fade
+        from PyQt6.QtWidgets import QGraphicsOpacityEffect
         if show_settings:
             for btn in self._main_nav_buttons:
                 btn.setVisible(False)
-            self._nav_back.setVisible(True)
-            for btn in self._settings_nav_buttons:
-                btn.setVisible(True)
-            staggered_fade(
-                [self._nav_back] + self._settings_nav_buttons,
-                duration_ms=100, stagger_ms=20, fade_in_=True,
-            )
+            # Debug button must be hidden in settings sub-nav — it belongs only to main nav
+            self._nav_debug.setVisible(False)
+            incoming = [self._nav_back] + self._settings_nav_buttons
         else:
             self._nav_back.setVisible(False)
             for btn in self._settings_nav_buttons:
                 btn.setVisible(False)
-            for btn in self._main_nav_buttons:
-                btn.setVisible(True)
-            staggered_fade(
-                self._main_nav_buttons,
-                duration_ms=100, stagger_ms=20, fade_in_=True,
-            )
+            # Restore debug button visibility based on developer mode state
+            try:
+                from ..config import load_config
+                if load_config().general.developer_mode:
+                    self._nav_debug.setVisible(True)
+            except Exception:
+                pass
+            incoming = list(self._main_nav_buttons)
+
+        # Cancel any pending stagger timers from a previous sidebar transition
+        for t in self._stagger_timers:
+            t.stop()
+        self._stagger_timers.clear()
+
+        # Pre-zero opacity before showing so there's no 1-frame flash
+        for btn in incoming:
+            eff = QGraphicsOpacityEffect(btn)
+            eff.setOpacity(0.0)
+            btn.setGraphicsEffect(eff)
+            btn.setVisible(True)
+        self._stagger_timers = staggered_fade(incoming, duration_ms=120, stagger_ms=25, fade_in_=True)
 
     def _switch_settings_section(self, idx: int) -> None:
         self._settings_page.switch_section(idx)
@@ -951,7 +2442,7 @@ class MittenMainWindow(QMainWindow):
         self._pages.setCurrentIndex(index)
         new_w = self._pages.currentWidget()
         from .anim import slide_fade_in
-        self._current_anim = slide_fade_in(new_w, direction=direction, distance=16, duration_ms=180)
+        self._start_anim("page_slide", slide_fade_in(new_w, direction=direction, distance=16, duration_ms=180))
 
     # ------------------------------------------------------------------ #
     # State & refresh
@@ -961,53 +2452,97 @@ class MittenMainWindow(QMainWindow):
         self._state = state
         self._dashboard.banner.set_state(state, detail)
         self.setWindowIcon(paw_icon(state))
+        # Keep sidebar logo in sync with app state when on dashboard
+        if self._pages.currentIndex() == 0:
+            try:
+                from . import themes as _t
+                self._logo_label.setText(_t.get_state_cat(state))
+            except Exception:
+                pass
 
     def _daemon_pid(self) -> int | None:
         return get_daemon_pid()
 
     def _refresh(self) -> None:
+        self._schizo_tick += 1
+        pid = self._daemon_pid()
+
         if not self._has_gsr:
             self._set_state("no_deps")
-            self._dashboard.card_ram.set_value("\u2014")
-            self._refresh_vram()
-            self._refresh_cpu()
-            self._refresh_clip_metrics()
-            self._refresh_clip_preview()
-            return
-
-        pid = self._daemon_pid()
-        if pid is None:
+        elif pid is None:
             self._set_state("idle")
-            self._dashboard.card_ram.set_value("\u2014")
+        elif RECORDER_DEAD_FILE.exists():
+            try:
+                reason = RECORDER_DEAD_FILE.read_text().strip()
+            except OSError:
+                reason = "recorder gave up after repeated crashes"
+            self._set_state("recorder_dead", reason)
+        elif PAUSE_FILE.exists():
+            self._set_state("paused")
         else:
             uptime_str = self._get_uptime_str(pid)
-            detail = f"mitten is watching\u2026"
+            detail = "mitten is watching\u2026"
             if uptime_str:
                 detail += f" \u00b7 up {uptime_str}"
             self._set_state("recording", detail)
-            self._refresh_memory(pid)
 
+        self._refresh_memory(pid)
         self._refresh_vram()
-        self._refresh_cpu()
+        self._refresh_cpu(pid)
         self._refresh_clip_metrics()
         self._refresh_clip_preview()
 
-    def _refresh_memory(self, pid: int) -> None:
-        total_mb = 0.0
+        # ── Schizo light-mode effects ──────────────────────────────────
+        try:
+            from . import themes as _themes_mod
+            if _themes_mod.LIGHT_MODE_ACTIVE:
+                _abuse = _themes_mod.get_abuse
+
+                # Window title flicker: every ~10 ticks, show insult for 1 tick then restore
+                _base_title = f"{CAT}  MITTEN"
+                if self._schizo_tick % 10 == 0:
+                    self.setWindowTitle(_abuse())
+                    QTimer.singleShot(1800, lambda: self.setWindowTitle(_base_title))
+
+                # Stat card value flicker: ~25% chance, one card per tick
+                if random.random() < 0.25:
+                    _cards = [
+                        self._dashboard.card_ram_mitten,
+                        self._dashboard.card_vram,
+                        self._dashboard.card_cpu,
+                    ]
+                    _card = random.choice(_cards)
+                    _real = _card._value.text()
+                    _card.set_value(_abuse(include_name=False))
+                    QTimer.singleShot(1600, lambda c=_card, v=_real: c.set_value(v))
+        except Exception:
+            pass
+
+    def _refresh_memory(self, pid: int | None) -> None:
+        try:
+            import psutil
+            vm = psutil.virtual_memory()
+            self._dashboard.card_ram_total.set_value(f"{vm.total / (1024**3):.1f} GB")
+            self._dashboard.card_ram_used.set_value(f"{vm.used / (1024**3):.1f} GB")
+        except Exception:
+            self._dashboard.card_ram_total.set_value("\u2014")
+            self._dashboard.card_ram_used.set_value("\u2014")
+
+        if pid is None:
+            self._dashboard.card_ram_mitten.set_value("\u2014")
+            return
         try:
             import psutil
             proc = psutil.Process(pid)
-            total_mb = proc.memory_info().rss / (1024 * 1024)
+            mb = proc.memory_info().rss / (1024 * 1024)
             for child in proc.children(recursive=True):
                 try:
-                    total_mb += child.memory_info().rss / (1024 * 1024)
+                    mb += child.memory_info().rss / (1024 * 1024)
                 except Exception:
                     pass
+            self._dashboard.card_ram_mitten.set_value(f"{mb:.0f} MB" if mb else "\u2014")
         except Exception:
-            pass
-        self._dashboard.card_ram.set_value(
-            f"{total_mb:.0f} MB" if total_mb else "\u2014"
-        )
+            self._dashboard.card_ram_mitten.set_value("\u2014")
 
     def _get_uptime_str(self, pid: int) -> str:
         try:
@@ -1025,13 +2560,28 @@ class MittenMainWindow(QMainWindow):
         else:
             self._dashboard.card_vram.set_value("\u2014")
 
-    def _refresh_cpu(self) -> None:
+    def _refresh_cpu(self, pid: int | None = None) -> None:
         try:
             import psutil
-            cpu = psutil.cpu_percent(interval=None)
-            self._dashboard.card_cpu.set_value(f"{cpu:.0f}%")
+            self._dashboard.card_cpu.set_value(f"{psutil.cpu_percent(interval=None):.0f}%")
         except Exception:
             self._dashboard.card_cpu.set_value("\u2014")
+
+        if pid is None:
+            self._dashboard.card_cpu_mitten.set_value("\u2014")
+            return
+        try:
+            import psutil
+            proc = psutil.Process(pid)
+            mitten_cpu = proc.cpu_percent(interval=None)
+            for child in proc.children(recursive=True):
+                try:
+                    mitten_cpu += child.cpu_percent(interval=None)
+                except Exception:
+                    pass
+            self._dashboard.card_cpu_mitten.set_value(f"{mitten_cpu:.1f}%")
+        except Exception:
+            self._dashboard.card_cpu_mitten.set_value("\u2014")
 
     def _refresh_clip_metrics(self) -> None:
         try:
@@ -1052,21 +2602,114 @@ class MittenMainWindow(QMainWindow):
         except Exception:
             save_dir = Path.home() / "Videos" / "mitten"
 
-        clips = sorted(save_dir.glob("mitten_*.mp4"), reverse=True)
-        if clips:
-            self._dashboard.clip_preview.set_clip(clips[0])
-        else:
+        try:
+            clips = sorted(save_dir.glob("mitten_*.mp4"), reverse=True)
+        except (FileNotFoundError, OSError):
             self._dashboard.clip_preview.set_clip(None)
+            return
+
+        if not clips:
+            self._dashboard.clip_preview.set_clip(None)
+            return
+
+        try:
+            if clips[0].stat().st_size == 0:
+                self._dashboard.clip_preview.set_saving()
+                return
+        except OSError:
+            self._dashboard.clip_preview.set_clip(None)
+            return
+
+        self._dashboard.clip_preview.set_clip(clips[0])
 
     # ------------------------------------------------------------------ #
-    # Actions
+    # Actions / Update checker
     # ------------------------------------------------------------------ #
+
+    def _run_update_check(self) -> None:
+        """Start a background thread to check for updates. Skips if one is already running."""
+        if self._update_checker and self._update_checker.isRunning():
+            return
+        self._update_checker = _UpdateCheckerThread(self)
+        self._update_checker.update_found.connect(self._on_update_found)
+        self._update_checker.start()
+
+    def _on_update_found(self, old_hash: str, new_hash: str, new_ver: str) -> None:
+        """Called on main thread when checker finds a newer version."""
+        if self._update_hashes == (old_hash, new_hash):
+            return  # already notified
+        self._update_hashes = (old_hash, new_hash)
+
+        display_ver = f"v{new_ver}" if new_ver else new_hash
+
+        # Desktop notification
+        from .. import notify as _notify
+        _notify.notify(
+            f"{CAT}  Mitten update available",
+            f"v{self._current_ver} → {display_ver}  — click Update in the app to install",
+            urgency="normal", icon="software-update-available", timeout_ms=6000,
+        )
+
+        # Show Update button in status banner
+        self._dashboard.banner.show_update_available()
+
+        # Update sidebar version display
+        self._ver_label.hide()
+        self._ver_row_label.setText(
+            f'<span style="color:{C.PINK}; font-size:9px;">v{self._current_ver}</span>'
+            f'<span style="color:{_hex_rgba(C.SUBTEXT, 0.6)};"> → </span>'
+            f'<span style="color:{C.GREEN}; font-size:9px; font-weight:700;">{display_ver}</span>'
+        )
+        self._ver_row_label.setTextFormat(Qt.TextFormat.RichText)
+        self._ver_update_widget.show()
+
+    def _do_update(self) -> None:
+        """Spawn update terminal and quit the GUI."""
+        if not self._update_hashes:
+            return
+        old_hash, new_hash = self._update_hashes
+        from ..updater import spawn_update_terminal
+        from PyQt6.QtWidgets import QApplication
+        spawn_update_terminal(old_hash, new_hash)
+        QApplication.instance().quit()
 
     def _toggle_recording(self) -> None:
-        toggle_daemon(self._daemon_pid())
-        QTimer.singleShot(1500, self._refresh)
+        ok = toggle_daemon(self._daemon_pid())
+        if not ok:
+            self._dashboard.banner.set_state("error", "failed to start/stop daemon — check journal")
+            QTimer.singleShot(4000, self._refresh)
+        else:
+            QTimer.singleShot(1500, self._refresh)
+
+    def _toggle_pause(self) -> None:
+        pid = self._daemon_pid()
+        if pid is None:
+            return
+        toggle_pause(pid)
+        QTimer.singleShot(800, self._refresh)
+
+    def _on_dev_mode_toggled(self, enabled: bool) -> None:
+        """Show or hide the Debug nav button when developer mode is toggled."""
+        # Only show the debug button when we're in the main nav, not the settings sub-nav.
+        # If we're in the settings sub-nav, the button stays hidden; it will be shown
+        # (if enabled) when the user exits settings via _fade_sidebar(show_settings=False).
+        if not self._settings_nav_active:
+            self._nav_debug.setVisible(enabled)
+        # If debug was the active page and we're hiding it, go back to dashboard
+        if not enabled and self._pages.currentIndex() == 4:
+            self._switch_main_page(0)
 
     def closeEvent(self, event) -> None:
+        # Cancel any pending stagger timers (Bug 2-1: QTimer on destroyed widgets)
+        for t in self._stagger_timers:
+            t.stop()
+        self._stagger_timers.clear()
+
+        # Stop orphaned update checker thread (Bug 3-3)
+        if self._update_checker and self._update_checker.isRunning():
+            self._update_checker.quit()
+            self._update_checker.wait(2000)
+
         self.hide()
         event.ignore()
 

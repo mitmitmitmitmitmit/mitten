@@ -5,10 +5,14 @@ Provides aggregate stats for the CLIPS pill tab.
 from __future__ import annotations
 
 import json
+import logging
+import os
 import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 METRICS_FILE = Path.home() / ".local" / "share" / "mitten" / "clip_metrics.json"
 
@@ -34,9 +38,13 @@ def log_clip_metric(metric: ClipMetric) -> None:
                 try:
                     records = json.loads(METRICS_FILE.read_text())
                 except Exception:
+                    log.warning("metrics file corrupt, rebuilding")
                     records = []
             records.append(asdict(metric))
-            METRICS_FILE.write_text(json.dumps(records))
+            tmp = METRICS_FILE.with_suffix('.tmp')
+            tmp.write_text(json.dumps(records))
+            os.replace(tmp, METRICS_FILE)
+            os.chmod(METRICS_FILE, 0o600)
     except Exception:
         pass
 

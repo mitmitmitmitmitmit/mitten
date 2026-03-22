@@ -153,7 +153,46 @@ def clear_icon_cache() -> None:
 # Application-wide stylesheet
 # ------------------------------------------------------------------ #
 
-STYLESHEET = f"""
+
+def _hex_rgba(hex_color: str, alpha: float) -> str:
+    """Compute rgba() string from any hex color string + alpha."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def _accent_rgba(alpha: float) -> str:
+    """Compute rgba() string from current C.LAVENDER + alpha."""
+    return _hex_rgba(C.LAVENDER, alpha)
+
+
+def _accent_hover() -> str:
+    """Slightly lighter version of C.LAVENDER for hover states."""
+    h = C.LAVENDER.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"#{min(255,r+28):02x}{min(255,g+28):02x}{min(255,b+28):02x}"
+
+
+def _pink_hover() -> str:
+    h = C.PINK.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"#{min(255,r+20):02x}{min(255,g+20):02x}{min(255,b+20):02x}"
+
+
+def make_stylesheet() -> str:
+    """Build the application stylesheet from current C palette values.
+    Call AFTER apply_theme() so all C attributes are set correctly."""
+    ah      = _accent_hover()
+    ph      = _pink_hover()
+    a_06    = _accent_rgba(0.06)
+    a_08    = _accent_rgba(0.08)
+    a_12    = _accent_rgba(0.12)
+    a_14    = _accent_rgba(0.14)
+    a_15    = _accent_rgba(0.15)
+    a_30    = _accent_rgba(0.30)
+    a_60    = _accent_rgba(0.60)
+
+    return f"""
 /* ── Base ── */
 QDialog, QWidget#centralWidget {{
     background-color: {C.BG};
@@ -196,39 +235,40 @@ QPushButton {{
     font-size: 12px;
 }}
 QPushButton:hover {{
-    background-color: #d4bff7;
+    background-color: {ah};
 }}
 QPushButton:pressed {{
     background-color: {C.DARK_ACCENT};
 }}
 QPushButton:disabled {{
-    background-color: rgba(49,50,68,0.5);
+    background-color: {C.OVERLAY};
     color: {C.GRAY};
 }}
 QPushButton[class="secondary"] {{
-    background-color: rgba(37,35,54,0.4);
+    background-color: {C.SURFACE};
     color: {C.TEXT};
     border: 1px solid {C.BORDER};
 }}
 QPushButton[class="secondary"]:hover {{
     border-color: {C.LAVENDER};
-    background-color: rgba(196,167,231,0.08);
+    background-color: {a_08};
     color: {C.LAVENDER};
 }}
 QPushButton[class="secondary"]:pressed {{
-    background-color: rgba(196,167,231,0.14);
+    background-color: {a_14};
 }}
 QPushButton[class="danger"] {{
     background-color: {C.PINK};
     color: {C.BG};
+    border: none;
 }}
 QPushButton[class="danger"]:hover {{
-    background-color: #f59baf;
+    background-color: {ph};
 }}
 
 /* ── Inputs ── */
 QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {{
-    background-color: rgba(37,35,54,0.6);
+    background-color: {C.SURFACE};
     color: {C.TEXT};
     border: 1px solid {C.BORDER};
     border-radius: 4px;
@@ -239,14 +279,14 @@ QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {{
     selection-color: {C.BG};
 }}
 QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QLineEdit:hover {{
-    border-color: rgba(196,167,231,0.6);
+    border-color: {a_60};
 }}
 QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {{
     border-color: {C.LAVENDER};
-    background-color: rgba(37,35,54,0.8);
+    background-color: {C.OVERLAY};
 }}
 
-/* ComboBox dropdown — let Qt draw the native arrow, just style the button area */
+/* ComboBox dropdown */
 QComboBox {{
     padding-right: 24px;
 }}
@@ -264,7 +304,7 @@ QComboBox::down-arrow {{
 QComboBox QAbstractItemView {{
     background-color: {C.SURFACE};
     color: {C.TEXT};
-    selection-background-color: rgba(196,167,231,0.15);
+    selection-background-color: {a_15};
     selection-color: {C.LAVENDER};
     border: 1px solid {C.BORDER};
     border-radius: 4px;
@@ -286,7 +326,7 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
 
 /* ── Slider ── */
 QSlider::groove:horizontal {{
-    background-color: rgba(58,54,80,0.6);
+    background-color: {C.OVERLAY};
     height: 4px;
     border-radius: 2px;
 }}
@@ -298,7 +338,7 @@ QSlider::handle:horizontal {{
     border-radius: 7px;
 }}
 QSlider::handle:horizontal:hover {{
-    background-color: #d4bff7;
+    background-color: {ah};
 }}
 QSlider::sub-page:horizontal {{
     background-color: {C.LAVENDER};
@@ -316,7 +356,7 @@ QCheckBox::indicator {{
     height: 18px;
     border: 2px solid {C.BORDER};
     border-radius: 4px;
-    background-color: rgba(37,35,54,0.5);
+    background-color: {C.SURFACE};
 }}
 QCheckBox::indicator:hover {{
     border-color: {C.LAVENDER};
@@ -329,12 +369,12 @@ QCheckBox::indicator:checked {{
 /* ── Table ── */
 QTableWidget {{
     background-color: transparent;
-    alternate-background-color: rgba(37,35,54,0.3);
+    alternate-background-color: {C.SURFACE};
     color: {C.TEXT};
     gridline-color: transparent;
     border: 1px solid {C.BORDER};
     border-radius: 6px;
-    selection-background-color: rgba(196,167,231,0.12);
+    selection-background-color: {a_12};
     selection-color: {C.TEXT};
     font-size: 12px;
 }}
@@ -343,14 +383,14 @@ QTableWidget::item {{
     border: none;
 }}
 QTableWidget::item:hover {{
-    background-color: rgba(196,167,231,0.06);
+    background-color: {a_06};
 }}
 QTableWidget::item:selected {{
-    background-color: rgba(196,167,231,0.14);
+    background-color: {a_14};
     color: {C.LAVENDER};
 }}
 QHeaderView::section {{
-    background-color: rgba(37,35,54,0.5);
+    background-color: {C.SURFACE};
     color: {C.SUBTEXT};
     border: none;
     border-bottom: 1px solid {C.BORDER};
@@ -362,7 +402,7 @@ QHeaderView::section {{
 
 /* ── Progress bar ── */
 QProgressBar {{
-    background-color: rgba(58,54,80,0.4);
+    background-color: {C.OVERLAY};
     border: none;
     border-radius: 3px;
     height: 6px;
@@ -381,12 +421,12 @@ QScrollBar:vertical {{
     margin: 0;
 }}
 QScrollBar::handle:vertical {{
-    background-color: rgba(58,54,80,0.5);
+    background-color: {C.BORDER};
     border-radius: 3px;
     min-height: 20px;
 }}
 QScrollBar::handle:vertical:hover {{
-    background-color: rgba(90,86,112,0.7);
+    background-color: {C.GRAY};
 }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0px;
@@ -397,12 +437,12 @@ QScrollBar:horizontal {{
     margin: 0;
 }}
 QScrollBar::handle:horizontal {{
-    background-color: rgba(58,54,80,0.5);
+    background-color: {C.BORDER};
     border-radius: 3px;
     min-width: 20px;
 }}
 QScrollBar::handle:horizontal:hover {{
-    background-color: rgba(90,86,112,0.7);
+    background-color: {C.GRAY};
 }}
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
     width: 0px;
@@ -413,15 +453,16 @@ QToolTip {{
     background-color: {C.SURFACE};
     color: {C.TEXT};
     border: 1px solid {C.BORDER};
-    padding: 5px 10px;
-    border-radius: 5px;
+    padding: 6px 12px;
+    border-radius: 8px;
     font-size: 12px;
+    opacity: 220;
 }}
 
 /* ── Group box ── */
 QGroupBox {{
-    background-color: rgba(37,35,54,0.35);
-    border: 1px solid rgba(58,54,80,0.4);
+    background-color: {C.SURFACE};
+    border: 1px solid {C.BORDER};
     border-radius: 8px;
     margin-top: 16px;
     padding: 12px;
@@ -439,7 +480,7 @@ QGroupBox::title {{
 
 /* ── List widget ── */
 QListWidget {{
-    background-color: rgba(37,35,54,0.4);
+    background-color: {C.SURFACE};
     color: {C.TEXT};
     border: 1px solid {C.BORDER};
     border-radius: 6px;
@@ -452,10 +493,10 @@ QListWidget::item {{
     border-radius: 3px;
 }}
 QListWidget::item:hover {{
-    background-color: rgba(196,167,231,0.06);
+    background-color: {a_06};
 }}
 QListWidget::item:selected {{
-    background-color: rgba(196,167,231,0.14);
+    background-color: {a_14};
     color: {C.LAVENDER};
 }}
 
@@ -473,12 +514,12 @@ QMenu::item {{
     margin: 1px 4px;
 }}
 QMenu::item:selected {{
-    background-color: rgba(196,167,231,0.12);
+    background-color: {a_12};
     color: {C.LAVENDER};
 }}
 QMenu::separator {{
     height: 1px;
-    background-color: rgba(58,54,80,0.6);
+    background-color: {C.BORDER};
     margin: 4px 10px;
 }}
 QMenu::item:disabled {{
@@ -490,6 +531,10 @@ QSplitter::handle {{
     background-color: {C.BORDER};
 }}
 QSplitter::handle:hover {{
-    background-color: rgba(196,167,231,0.3);
+    background-color: {a_30};
 }}
 """
+
+
+# Keep STYLESHEET as a lazy alias for backwards compat (first import before theme)
+STYLESHEET = make_stylesheet()

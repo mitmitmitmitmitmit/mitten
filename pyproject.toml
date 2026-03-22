@@ -1,6 +1,6 @@
 [project]
 name = "mitten"
-version = "0.2.0"
+version = "0.2.25"
 description = "Personal Linux screen recording clip tool"
 requires-python = ">=3.11"
 dependencies = [
@@ -23,4 +23,4 @@ where = ["."]
 include = ["mitten*"]
 
 [tool.setuptools.package-data]
-mitten = ["assets/*.png"]
+mitten = ["assets/*.png", "assets/*.oga", "assets/*.mp3"]

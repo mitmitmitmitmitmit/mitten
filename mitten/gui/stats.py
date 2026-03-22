@@ -6,6 +6,7 @@ Updates every 2s via QTimer.
 """
 from __future__ import annotations
 
+import random
 import time
 from datetime import datetime
 from pathlib import Path
@@ -122,7 +123,18 @@ class StatsPanel(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle(f"{CAT}  mitten stats")
+        _title = f"{CAT}  mitten stats"
+        try:
+            from .themes import LIGHT_MODE_ACTIVE as _LMA
+            if _LMA:
+                _title = random.choice([
+                    f"{CAT}  mitten stats (sadly)",
+                    f"{CAT}  mitten stats · light mode freak",
+                    f"{CAT}  stats (ur theme is the real bug)",
+                ])
+        except Exception:
+            pass
+        self.setWindowTitle(_title)
         self.setFixedSize(310, 400)
         self.setWindowFlags(
             Qt.WindowType.Dialog | Qt.WindowType.WindowStaysOnTopHint
@@ -148,7 +160,14 @@ class StatsPanel(QDialog):
         root.addWidget(self._banner)
 
         # ── memory section ──
-        mem_label = QLabel("memory")
+        _mem_text = "memory"
+        try:
+            from .themes import LIGHT_MODE_ACTIVE as _LMA
+            if _LMA and random.random() < 0.30:
+                _mem_text = random.choice(["memory (wasted)", "memory (like ur choices)", "memory"])
+        except Exception:
+            pass
+        mem_label = QLabel(_mem_text)
         mem_label.setStyleSheet(
             f"color: {C.SUBTEXT}; font-size: 11px; font-weight: 600;"
         )
@@ -195,7 +214,14 @@ class StatsPanel(QDialog):
         root.addWidget(self._vram_card)
 
         # ── caught today ──
-        today_label = QLabel("caught today")
+        _today_text = "caught today"
+        try:
+            from .themes import LIGHT_MODE_ACTIVE as _LMA
+            if _LMA and random.random() < 0.30:
+                _today_text = random.choice(["caught today (despite ur theme)", "caught today (somehow)", "caught today"])
+        except Exception:
+            pass
+        today_label = QLabel(_today_text)
         today_label.setStyleSheet(
             f"color: {C.SUBTEXT}; font-size: 11px; font-weight: 600;"
         )
@@ -337,7 +363,18 @@ class StatsPanel(QDialog):
             short_name = last.stem.replace("mitten_", "").replace("_", " ")
             self._last_val.setText(f"{short_name}  ·  {size_mb:.1f} MB")
         else:
-            self._last_val.setText("no clips yet")
+            _no_clips_txt = "no clips yet"
+            try:
+                from .themes import LIGHT_MODE_ACTIVE as _LMA
+                if _LMA:
+                    _no_clips_txt = random.choice([
+                        "no clips yet (just vibes and bad taste)",
+                        "no clips yet (fix ur theme first)",
+                        "no clips yet",
+                    ])
+            except Exception:
+                pass
+            self._last_val.setText(_no_clips_txt)
 
     # ------------------------------------------------------------------ #
     # Lifecycle

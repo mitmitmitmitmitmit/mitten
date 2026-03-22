@@ -164,8 +164,11 @@ class GpuRecorder:
             "-c", cfg.recorder.container,
             "-o", str(TMP_DIR),
         ]
-        if cfg.recorder.audio_device:
-            cmd += ["-a", cfg.recorder.audio_device]
+        audio = cfg.recorder.audio_device
+        if audio == "default":
+            audio = "default_output"  # gpu-screen-recorder token for system audio
+        if audio:
+            cmd += ["-a", audio]
         return cmd
 
     def _launch(self) -> None:
@@ -249,3 +252,82 @@ class GpuRecorder:
             with self._lock:
                 if not self._shutdown.is_set():
                     self._launch()
+
+
+class SessionRecorder:
+    """
+    Full session recorder — no replay buffer, records directly to an output file.
+    Started by triple-click; stopped by triple-click again.
+    Uses gpu-screen-recorder without -r flag.
+    """
+
+    def __init__(self, config: MittenConfig) -> None:
+        self._config = config
+        self._proc: subprocess.Popen | None = None
+        self._output_path: Path | None = None
+        self._lock = threading.Lock()
+
+    def is_recording(self) -> bool:
+        with self._lock:
+            return self._proc is not None and self._proc.poll() is None
+
+    def start(self, output_path: Path) -> None:
+        """Start full session recording to output_path."""
+        with self._lock:
+            if self._proc and self._proc.poll() is None:
+                log.warning("Session recorder already running")
+                return
+            cfg = self._config
+            r = cfg.recorder
+            g = cfg.general
+
+            monitor = cfg.general.monitor
+            if monitor == "auto":
+                monitor = detect_monitor()
+
+            audio = cfg.recorder.audio_device
+            if audio == "default":
+                audio = "default_output"
+
+            cmd = [
+                "gpu-screen-recorder",
+                "-w", monitor,
+                "-f", str(g.framerate),
+                "-q", r.quality,
+                "-k", r.capture_codec,
+                "-c", "mp4",
+                "-o", str(output_path),
+            ]
+            if audio:
+                cmd += ["-a", audio]
+
+            self._output_path = output_path
+            log.info("Starting session recorder: %s", " ".join(cmd))
+            self._proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+
+    def stop(self) -> Path | None:
+        """Stop recording. Returns the output path if successful, None otherwise."""
+        with self._lock:
+            if not self._proc or self._proc.poll() is not None:
+                log.warning("Session recorder not running")
+                return None
+            try:
+                self._proc.send_signal(signal.SIGINT)
+                self._proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                self._proc.terminate()
+                self._proc.wait(timeout=5)
+            except Exception as e:
+                log.error("Session stop error: %s", e)
+            path = self._output_path
+            self._proc = None
+            self._output_path = None
+            if path and path.exists() and path.stat().st_size > 0:
+                log.info("Session recording saved: %s", path)
+                return path
+            log.warning("Session output missing or empty: %s", path)
+            return None

@@ -4,7 +4,10 @@ config_to_toml(cfg) -> str produces a valid config.toml string.
 """
 from __future__ import annotations
 
-from ..config import MittenConfig
+import os
+from pathlib import Path
+
+from ..config import MittenConfig, CONFIG_FILE
 
 
 def config_to_toml(cfg: MittenConfig) -> str:
@@ -27,6 +30,8 @@ buffer_seconds = {g.buffer_seconds}
 framerate = {g.framerate}
 save_dir = {_q(save_dir)}
 monitor = {_q(g.monitor)}
+theme = {_q(g.theme)}
+developer_mode = {_bool(g.developer_mode)}
 
 [recorder]
 container = {_q(r.container)}
@@ -35,6 +40,8 @@ capture_codec = {_q(r.capture_codec)}
 output_codec = {_q(r.output_codec)}
 watermark_cq = {r.watermark_cq}
 audio_device = {_q(r.audio_device)}
+auto_compress = {_bool(r.auto_compress)}
+compression_target_mb = {r.compression_target_mb}
 
 [trigger]
 button = {_q(t.button)}
@@ -44,6 +51,7 @@ cooldown = {t.cooldown}
 enabled = {_bool(wm.enabled)}
 text = {_q(wm.text)}
 subtext = {_q(wm.subtext)}
+font_family = {_q(wm.font_family)}
 fontsize = {wm.fontsize}
 fontcolor = {_q(wm.fontcolor)}
 position = {_q(wm.position)}
@@ -62,6 +70,16 @@ on_start = {_bool(n.on_start)}
 on_save = {_bool(n.on_save)}
 on_error = {_bool(n.on_error)}
 """
+
+
+def save_config(cfg: MittenConfig, path: Path | None = None) -> None:
+    """Atomically write config to disk. Creates parent dirs if needed."""
+    dest = path or CONFIG_FILE
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix('.tmp')
+    tmp.write_text(config_to_toml(cfg))
+    os.replace(tmp, dest)
+    os.chmod(dest, 0o600)
 
 
 def _q(s: str) -> str:
