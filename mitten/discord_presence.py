@@ -112,6 +112,11 @@ class DiscordPresence:
         with self._lock:
             self._show_ascii = show_ascii
 
+    def reset_rate_limit(self) -> None:
+        """Bypass the send rate limiter for the next update (e.g. on window focus)."""
+        with self._lock:
+            self._last_send_ts = 0.0
+
     def set_state(
         self,
         state: str,

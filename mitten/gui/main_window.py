@@ -2735,7 +2735,8 @@ class MittenMainWindow(QMainWindow):
         from PyQt6.QtCore import QEvent
         super().changeEvent(event)
         if event.type() == QEvent.Type.WindowActivate and self._gui_presence is not None:
-            self._gui_presence_last_send = 0.0  # bypass rate limiter
+            self._gui_presence_last_send = 0.0
+            self._gui_presence.reset_rate_limit()
             self._gui_presence_dirty = True
             self._flush_gui_presence()
 
