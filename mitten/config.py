@@ -93,6 +93,16 @@ class NotificationsConfig:
 
 
 @dataclass(frozen=True)
+class DiscordConfig:
+    enabled: bool = True
+    show_ascii: bool = True
+    animated_ascii: bool = True
+    show_game_name: bool = True    # False = "clipping with mitten" instead of actual game name
+    show_mode_label: bool = True   # False = activity name is just "mitten"
+    show_name: bool = True         # False = no name override (uses app name "MITTEN")
+
+
+@dataclass(frozen=True)
 class MittenConfig:
     general: GeneralConfig
     recorder: RecorderConfig
@@ -100,6 +110,7 @@ class MittenConfig:
     watermark: WatermarkConfig
     game_detection: GameDetectionConfig
     notifications: NotificationsConfig
+    discord: DiscordConfig = field(default_factory=DiscordConfig)
 
 
 def _resolve_path(p: str) -> Path:
@@ -162,6 +173,7 @@ def load_config(config_path: Path | None = None) -> MittenConfig:
     wm = raw.get("watermark", {})
     gd = raw.get("game_detection", {})
     n  = raw.get("notifications", {})
+    d  = raw.get("discord", {})
 
     cfg = MittenConfig(
         general=GeneralConfig(
@@ -209,6 +221,14 @@ def load_config(config_path: Path | None = None) -> MittenConfig:
             on_start=bool(n.get("on_start", True)),
             on_save=bool(n.get("on_save", True)),
             on_error=bool(n.get("on_error", True)),
+        ),
+        discord=DiscordConfig(
+            enabled=bool(d.get("enabled", True)),
+            show_ascii=bool(d.get("show_ascii", True)),
+            animated_ascii=bool(d.get("animated_ascii", True)),
+            show_game_name=bool(d.get("show_game_name", True)),
+            show_mode_label=bool(d.get("show_mode_label", True)),
+            show_name=bool(d.get("show_name", True)),
         ),
     )
 
@@ -267,4 +287,12 @@ enabled = true
 on_start = true
 on_save = true
 on_error = true
+
+[discord]
+enabled = true
+show_ascii = true
+animated_ascii = true
+show_game_name = true
+show_mode_label = true
+show_name = true
 """

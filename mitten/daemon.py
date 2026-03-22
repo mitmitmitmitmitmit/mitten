@@ -325,13 +325,25 @@ class MittenDaemon:
                 urgency="critical", icon="dialog-error", timeout_ms=8000,
             )
 
-    def _recording_name(self) -> str:
+    def _recording_name(self) -> str | None:
+        dc = self._config.discord
+        if not dc.show_name:
+            return None
+        if not dc.show_mode_label:
+            return "mitten"
         if self._config.general.mode == "window":
             return "window with mitten"
         return "desktop with mitten"
 
     def _on_game_start(self, game: GameInfo) -> None:
-        self._presence.set_state("game", detail_override=game.name, name_override=f"{game.name} with mitten")
+        dc = self._config.discord
+        if dc.show_game_name:
+            detail = game.name
+            name = f"{game.name} with mitten" if dc.show_name else None
+        else:
+            detail = None
+            name = ("clipping with mitten" if dc.show_mode_label else "mitten") if dc.show_name else None
+        self._presence.set_state("game", detail_override=detail, name_override=name)
         log.info("Game started: %s", game.name)
         if self._config.notifications.enabled:
             notify.notify(

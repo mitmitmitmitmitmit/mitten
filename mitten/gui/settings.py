@@ -777,6 +777,7 @@ class SettingsDialog(QWidget):
         self._pages.addWidget(self._make_compression_tab())   # 2
         self._pages.addWidget(self._make_watermark_tab())     # 3
         self._pages.addWidget(self._make_games_tab())         # 4
+        self._pages.addWidget(self._make_discord_tab())       # 5
         root.addWidget(self._pages, 1)
 
         save_bar = QWidget()
@@ -1416,6 +1417,65 @@ class SettingsDialog(QWidget):
 
         return page
 
+    def _make_discord_tab(self) -> QWidget:
+        page, form = self._page_wrapper()
+
+        note = QLabel("works with Discord, Vesktop, Flatpak Discord, and arrpc. everyone uses the same app id — no per-user setup.")
+        note.setWordWrap(True)
+        note.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px; font-style: italic;")
+        form.addRow("", note)
+
+        self._dc_enabled = QCheckBox("Enable Discord rich presence")
+        form.addRow(self._dc_enabled)
+
+        form.addRow(_sep("ACTIVITY NAME"))
+
+        hint_name = QLabel("controls what shows in the compact friends list view")
+        hint_name.setWordWrap(True)
+        hint_name.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px;")
+        form.addRow("", hint_name)
+
+        self._dc_show_game_name = QCheckBox("Show game name  (e.g. \"Garry's Mod with mitten\")")
+        form.addRow(self._dc_show_game_name)
+
+        hint_game = QLabel("when off: shows \"clipping with mitten\" instead of the actual game name")
+        hint_game.setWordWrap(True)
+        hint_game.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px;")
+        form.addRow("", hint_game)
+
+        self._dc_show_mode_label = QCheckBox("Show mode in activity  (e.g. \"desktop with mitten\")")
+        form.addRow(self._dc_show_mode_label)
+
+        hint_mode = QLabel("when off: activity name shows just \"mitten\"")
+        hint_mode.setWordWrap(True)
+        hint_mode.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px;")
+        form.addRow("", hint_mode)
+
+        self._dc_show_name = QCheckBox("Show \"mitten\" in activity name")
+        form.addRow(self._dc_show_name)
+
+        coward_lbl = QLabel(
+            "toggle this off if you're too much of a pussy to have MITTEN in your discord status lol fucking loser"
+        )
+        coward_lbl.setWordWrap(True)
+        coward_lbl.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px; font-style: italic;")
+        form.addRow("", coward_lbl)
+
+        form.addRow(_sep("DETAILS"))
+
+        self._dc_show_ascii = QCheckBox("Show ASCII cat art in status")
+        form.addRow(self._dc_show_ascii)
+
+        self._dc_animated_ascii = QCheckBox("Animate cat art  (syncs with UI — vibe cycle, game mode, etc.)")
+        form.addRow(self._dc_animated_ascii)
+
+        hint_anim = QLabel("cat art changes when you watch a clip, a game starts, etc. — pulls from the same animation system as the sidebar")
+        hint_anim.setWordWrap(True)
+        hint_anim.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px;")
+        form.addRow("", hint_anim)
+
+        return page
+
     def _on_disable_abuse_clicked(self) -> None:
         """Anti-disable gauntlet — always keeps abuse on, just cycles through stages."""
         self._disable_abuse_cb.blockSignals(True)
@@ -1612,6 +1672,14 @@ class SettingsDialog(QWidget):
         self._notif_error.setChecked(n.on_error)
         self._toggle_notify_fields(n.enabled)
 
+        d = cfg.discord
+        self._dc_enabled.setChecked(d.enabled)
+        self._dc_show_ascii.setChecked(d.show_ascii)
+        self._dc_animated_ascii.setChecked(d.animated_ascii)
+        self._dc_show_game_name.setChecked(d.show_game_name)
+        self._dc_show_mode_label.setChecked(d.show_mode_label)
+        self._dc_show_name.setChecked(d.show_name)
+
         try:
             from .themes import LIGHT_MODE_ACTIVE as _LMA
             if _LMA and random.random() < 0.30:
@@ -1769,7 +1837,7 @@ class SettingsDialog(QWidget):
         from ..config import (
             MittenConfig, GeneralConfig, RecorderConfig,
             TriggerConfig, WatermarkConfig, GameDetectionConfig,
-            NotificationsConfig, _validate,
+            NotificationsConfig, DiscordConfig, _validate,
         )
         from .config_io import save_config
 
@@ -1847,6 +1915,14 @@ class SettingsDialog(QWidget):
                 on_start=self._notif_start.isChecked(),
                 on_save=self._notif_save.isChecked(),
                 on_error=self._notif_error.isChecked(),
+            ),
+            discord=DiscordConfig(
+                enabled=self._dc_enabled.isChecked(),
+                show_ascii=self._dc_show_ascii.isChecked(),
+                animated_ascii=self._dc_animated_ascii.isChecked(),
+                show_game_name=self._dc_show_game_name.isChecked(),
+                show_mode_label=self._dc_show_mode_label.isChecked(),
+                show_name=self._dc_show_name.isChecked(),
             ),
         )
 

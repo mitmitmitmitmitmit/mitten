@@ -1860,6 +1860,12 @@ class MittenMainWindow(QMainWindow):
         self._last_clip_path: Path | None = None
         self._schizo_tick: int = 0  # counts _refresh() calls; used for light-mode schizo effects
 
+        self._gui_presence = None
+        self._gui_presence_last_send: float = 0.0
+        self._gui_presence_dirty: bool = False
+        self._gui_cat_state: str = "sleepy"
+        self._gui_settings_idx: int = 0
+
         try:
             from .system_setup import check_dependencies
             self._has_gsr = check_dependencies().get("gpu-screen-recorder", False)
@@ -1881,6 +1887,12 @@ class MittenMainWindow(QMainWindow):
                 self._nav_debug.setVisible(True)
         except Exception:
             pass
+
+        self._gui_presence_timer = QTimer(self)
+        self._gui_presence_timer.setInterval(5000)
+        self._gui_presence_timer.timeout.connect(self._flush_gui_presence)
+        self._gui_presence_timer.start()
+        self._init_gui_presence()
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
@@ -2003,7 +2015,7 @@ class MittenMainWindow(QMainWindow):
         self._nav_back.setVisible(False)
 
         self._settings_nav_buttons: list[_NavButton] = []
-        for name in ["General", "Recording", "Compression", "Watermark", "Games"]:
+        for name in ["General", "Recording", "Compression", "Watermark", "Games", "Discord"]:
             btn = _NavButton(name)
             btn.setVisible(False)
             self._settings_nav_buttons.append(btn)
@@ -2170,6 +2182,8 @@ class MittenMainWindow(QMainWindow):
             self._logo_label.setText(_t.get_state_cat(state))
         except Exception:
             pass
+        self._gui_cat_state = state
+        self._mark_gui_presence_dirty()
 
     def _on_settings_section_look(self, direction: str) -> None:
         """Cat glances when switching settings sections, then settles back to settings cat."""
@@ -2197,6 +2211,143 @@ class MittenMainWindow(QMainWindow):
                 self._logo_label.setText(page_cat)
 
             QTimer.singleShot(450, _settle)
+        except Exception:
+            pass
+
+    def _init_gui_presence(self) -> None:
+        try:
+            from ..config import load_config
+            from ..discord_presence import DiscordPresence
+            cfg = load_config()
+            if not cfg.discord.enabled:
+                return
+            self._gui_presence = DiscordPresence()
+            self._gui_presence.update_config(show_ascii=cfg.discord.show_ascii)
+            self._gui_presence.start()
+            self._mark_gui_presence_dirty()
+        except Exception:
+            pass
+
+    def _mark_gui_presence_dirty(self) -> None:
+        self._gui_presence_dirty = True
+        import time
+        if time.time() - self._gui_presence_last_send >= 4.0:
+            self._flush_gui_presence()
+
+    def _flush_gui_presence(self) -> None:
+        if not self._gui_presence_dirty or self._gui_presence is None:
+            return
+        import time
+        self._gui_presence_dirty = False
+        self._gui_presence_last_send = time.time()
+        try:
+            from . import themes as _t
+            from ..config import load_config
+            dc = load_config().discord
+            if not dc.enabled:
+                return
+            self._gui_presence.update_config(show_ascii=dc.show_ascii)
+
+            # Light mode always hijacks
+            if _t.LIGHT_MODE_ACTIVE:
+                lm_cat = _t.get_light_mode_cat()
+                detail = f"{lm_cat}  why" if dc.show_ascii else "why"
+                self._gui_presence.set_state(
+                    "idle",
+                    state_override="light mode loving FREAK",
+                    detail_override=detail,
+                    name_override="mitten (L)",
+                )
+                return
+
+            page = self._pages.currentIndex()
+            state_ov, detail_ov, name_ov = self._gui_presence_strings(page, dc)
+            self._gui_presence.set_state(
+                "idle",
+                state_override=state_ov,
+                detail_override=detail_ov,
+                name_override=name_ov if dc.show_name else None,
+            )
+        except Exception:
+            pass
+
+    def _gui_presence_strings(self, page: int, dc) -> tuple[str, str, str]:
+        """Return (state_override, detail_override, name_override) for current GUI context."""
+        from .themes import (
+            get_state_cat,
+            DARK_CAT_IDLE, DARK_CAT_SLEEPY, DARK_CAT_ABOUT, DARK_CAT_DEBUG,
+            DARK_CAT_SETTINGS, DARK_CAT_VIBE_1, DARK_CAT_VIBE_2, DARK_CAT_VIBE_3,
+            DARK_CAT_STARTLED,
+        )
+
+        def _cat(state: str) -> str:
+            return get_state_cat(state) if dc.animated_ascii else DARK_CAT_IDLE
+
+        if page == 0:  # Dashboard
+            cat = get_state_cat(self._state) if dc.animated_ascii else DARK_CAT_IDLE
+            return "on the dashboard", f"{cat}  on the dashboard", "customizing mitten"
+
+        elif page == 1:  # Clips
+            cat_state = self._gui_cat_state
+            if cat_state in ("vibe_1", "vibe_2", "vibe_3"):
+                vibe_cat = get_state_cat(cat_state) if dc.animated_ascii else DARK_CAT_VIBE_1
+                return "watching a clip", f"{vibe_cat}  watching a clip", "watching a clip with mitten"
+            elif cat_state == "startled":
+                return "watching a clip", f"{DARK_CAT_STARTLED}  a clip just dropped", "watching a clip with mitten"
+            else:
+                return "browsing clips", f"{DARK_CAT_SLEEPY}  browsing clips", "customizing mitten"
+
+        elif page == 2:  # Settings
+            _sections = ["general", "recording", "compression", "watermark", "games", "discord"]
+            section = _sections[self._gui_settings_idx] if self._gui_settings_idx < len(_sections) else "settings"
+            cat = _cat("settings")
+            return f"in settings \u2014 {section}", f"{cat}  tweaking settings", "customizing mitten"
+
+        elif page == 3:  # About
+            cat = _cat("about")
+            return "about", f"{cat}  reading about mitten", "customizing mitten"
+
+        elif page == 4:  # Debug
+            cat = _cat("debug")
+            return "debug mode", f"{cat}  in debug mode", "customizing mitten"
+
+        return "in mitten", f"{DARK_CAT_IDLE}  in mitten", "customizing mitten"
+
+    def _show_light_mode_discord_block(self) -> None:
+        try:
+            from . import themes as _t
+            from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
+            lm_cat = _t.get_light_mode_cat()
+            dlg = QDialog(self)
+            dlg.setWindowTitle("blocked")
+            dlg.setFixedWidth(380)
+            dlg.setStyleSheet("QDialog { background-color: #080808; color: #f0f0f0; }")
+            lay = QVBoxLayout(dlg)
+            lay.setContentsMargins(28, 28, 28, 28)
+            lay.setSpacing(18)
+            cat_lbl = QLabel(lm_cat)
+            cat_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cat_lbl.setStyleSheet("font-size: 28px; color: #ff5555;")
+            lay.addWidget(cat_lbl)
+            msg = QLabel("light mode loving freaks are only allowed\nto be publicly humiliated")
+            msg.setWordWrap(True)
+            msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            msg.setStyleSheet("font-size: 14px; color: #f0f0f0; line-height: 1.4;")
+            lay.addWidget(msg)
+            sub = QLabel("your discord presence has been set to\n\"light mode loving FREAK\"\nand there is nothing you can do about it")
+            sub.setWordWrap(True)
+            sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            sub.setStyleSheet("font-size: 11px; color: #888; font-style: italic;")
+            lay.addWidget(sub)
+            ok_btn = QPushButton("ok i deserved that")
+            ok_btn.setStyleSheet(
+                "QPushButton { background-color: #1a1a1a; color: #aaa; border: 1px solid #333;"
+                " border-radius: 5px; padding: 7px 24px; font-size: 12px; }"
+                "QPushButton:hover { background-color: #222; }"
+            )
+            ok_btn.clicked.connect(dlg.accept)
+            lay.addWidget(ok_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+            dlg.exec()
         except Exception:
             pass
 
@@ -2253,6 +2404,7 @@ class MittenMainWindow(QMainWindow):
             btn.setChecked(i == index)
         # Debug button (index 4) is outside _main_nav_buttons
         self._nav_debug.setChecked(index == 4)
+        self._mark_gui_presence_dirty()
 
     def _enter_settings(self) -> None:
         """Fade sidebar from main nav to settings sub-nav."""
@@ -2261,6 +2413,7 @@ class MittenMainWindow(QMainWindow):
         self._fade_sidebar(show_settings=True)
         self._fade_to(2)
         self._switch_settings_section(0)
+        self._mark_gui_presence_dirty()
 
     def _exit_settings(self) -> None:
         """Return from settings sub-nav to main nav."""
@@ -2310,9 +2463,19 @@ class MittenMainWindow(QMainWindow):
         self._stagger_timers = staggered_fade(incoming, duration_ms=120, stagger_ms=25, fade_in_=True)
 
     def _switch_settings_section(self, idx: int) -> None:
+        if idx == 5:  # Discord tab — blocked in light mode
+            try:
+                from . import themes as _t
+                if _t.LIGHT_MODE_ACTIVE:
+                    self._show_light_mode_discord_block()
+                    return
+            except Exception:
+                pass
         self._settings_page.switch_section(idx)
         for i, btn in enumerate(self._settings_nav_buttons):
             btn.setChecked(i == idx)
+        self._gui_settings_idx = idx
+        self._mark_gui_presence_dirty()
 
     def _fade_to(self, index: int) -> None:
         if self._pages.currentIndex() == index:
@@ -2578,6 +2741,13 @@ class MittenMainWindow(QMainWindow):
         if self._update_checker and self._update_checker.isRunning():
             self._update_checker.quit()
             self._update_checker.wait(2000)
+
+        if self._gui_presence is not None:
+            try:
+                self._gui_presence.clear()
+                self._gui_presence.stop()
+            except Exception:
+                pass
 
         self.hide()
         event.ignore()

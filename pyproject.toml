@@ -1,6 +1,6 @@
 [project]
 name = "mitten"
-version = "0.2.28.2"
+version = "0.2.29"
 description = "Personal Linux screen recording clip tool"
 requires-python = ">=3.11"
 dependencies = [

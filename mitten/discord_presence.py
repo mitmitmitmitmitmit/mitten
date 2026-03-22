@@ -84,6 +84,8 @@ class DiscordPresence:
         self._shutdown  = threading.Event()
         self._pending_state: str | None = None   # buffered while disconnected
         self._start_ts: int = int(time.time())   # session start timestamp
+        self._show_ascii: bool = True
+        self._last_send_ts: float = 0.0          # for rate limiting (Discord: 5/20s)
 
         self._thread = threading.Thread(
             target=self._run,
@@ -105,17 +107,30 @@ class DiscordPresence:
                     pass
                 self._sock = None
 
-    def set_state(self, state: str, detail_override: str | None = None, name_override: str | None = None) -> None:
-        """Update Discord presence to reflect the given daemon state.
-        detail_override replaces the default details line.
-        name_override sets the activity name shown in the compact friends list."""
+    def update_config(self, show_ascii: bool) -> None:
+        """Hot-reload display settings from config."""
+        with self._lock:
+            self._show_ascii = show_ascii
+
+    def set_state(
+        self,
+        state: str,
+        state_override: str | None = None,
+        detail_override: str | None = None,
+        name_override: str | None = None,
+    ) -> None:
+        """Update Discord presence.
+        state_override replaces the lower status line text.
+        detail_override replaces the upper details line.
+        name_override sets the activity name (compact friends list)."""
         with self._lock:
             self._pending_state = state
+            self._state_override = state_override
             self._detail_override = detail_override
             self._name_override = name_override
             if self._connected:
                 try:
-                    self._send_presence(state, detail_override, name_override)
+                    self._send_presence(state, state_override, detail_override, name_override)
                 except OSError:
                     self._connected = False
                     self._sock = None
@@ -141,12 +156,13 @@ class DiscordPresence:
                 # Flush any state that arrived while disconnected
                 with self._lock:
                     pending = self._pending_state
-                    override = getattr(self, "_detail_override", None)
+                    state_ov = getattr(self, "_state_override", None)
+                    detail_ov = getattr(self, "_detail_override", None)
                     name_ov = getattr(self, "_name_override", None)
                 if pending:
                     try:
                         with self._lock:
-                            self._send_presence(pending, override, name_ov)
+                            self._send_presence(pending, state_ov, detail_ov, name_ov)
                     except OSError:
                         with self._lock:
                             self._connected = False
@@ -182,12 +198,30 @@ class DiscordPresence:
             with self._lock:
                 self._sock = None
 
-    def _send_presence(self, state: str, detail_override: str | None = None, name_override: str | None = None) -> None:
+    def _send_presence(
+        self,
+        state: str,
+        state_override: str | None = None,
+        detail_override: str | None = None,
+        name_override: str | None = None,
+    ) -> None:
         """Build and send a SET_ACTIVITY frame. Must be called with lock held."""
+        # Rate limit: Discord allows ~5 updates per 20s
+        now = time.time()
+        if now - self._last_send_ts < 4.0:
+            return
+        self._last_send_ts = now
+
         entry = _PRESENCE_STATES.get(state, _PRESENCE_STATES["idle"])
         activity_state, activity_details = entry
+        if state_override:
+            activity_state = state_override
         if detail_override:
             activity_details = detail_override
+
+        # Strip cat art prefix if show_ascii is off ("cat  text" → "text")
+        if not self._show_ascii and "  " in activity_details:
+            activity_details = activity_details.split("  ", 1)[1]
 
         activity: dict = {
             "state":      activity_state,

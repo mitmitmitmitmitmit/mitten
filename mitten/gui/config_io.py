@@ -17,6 +17,7 @@ def config_to_toml(cfg: MittenConfig) -> str:
     wm = cfg.watermark
     gd = cfg.game_detection
     n  = cfg.notifications
+    dc = cfg.discord
 
     save_dir = str(g.save_dir).replace(str(__import__("pathlib").Path.home()), "~")
 
@@ -69,6 +70,14 @@ enabled = {_bool(n.enabled)}
 on_start = {_bool(n.on_start)}
 on_save = {_bool(n.on_save)}
 on_error = {_bool(n.on_error)}
+
+[discord]
+enabled = {_bool(dc.enabled)}
+show_ascii = {_bool(dc.show_ascii)}
+animated_ascii = {_bool(dc.animated_ascii)}
+show_game_name = {_bool(dc.show_game_name)}
+show_mode_label = {_bool(dc.show_mode_label)}
+show_name = {_bool(dc.show_name)}
 """
 
 
