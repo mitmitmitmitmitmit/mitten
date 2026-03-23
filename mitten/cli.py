@@ -156,9 +156,27 @@ def _show_crash_dialog(exc_type: type, exc_value: BaseException, tb_text: str) -
             try:
                 from .updater import restore_backup, get_repo_dir
                 import subprocess as _sub
+                import json as _json
+                # Capture the bad version before reverting
+                try:
+                    from importlib.metadata import version as _iv
+                    _bad_ver = _iv("mitten")
+                except Exception:
+                    _bad_ver = ""
                 repo = get_repo_dir()
                 ok = repo is not None and restore_backup(repo)
                 if ok:
+                    # Write revert lock so update notifications stay suppressed
+                    # until a version newer than the bad one is published
+                    if _bad_ver:
+                        try:
+                            from .config import REVERT_LOCK_FILE
+                            REVERT_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+                            REVERT_LOCK_FILE.write_text(
+                                _json.dumps({"blocked_version": _bad_ver})
+                            )
+                        except Exception:
+                            pass
                     _sub.run(
                         [sys.executable, "-m", "pip", "install", "-e", ".",
                          "--break-system-packages", "-q"],

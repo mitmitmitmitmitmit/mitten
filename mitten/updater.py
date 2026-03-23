@@ -105,6 +105,30 @@ def check_for_update() -> tuple[str, str] | None:
         except Exception:
             pass
 
+        # Revert lock: suppress update notifications until a version newer
+        # than the one the user reverted away from is published
+        try:
+            import json as _json
+            from .config import REVERT_LOCK_FILE
+            if REVERT_LOCK_FILE.exists():
+                lock = _json.loads(REVERT_LOCK_FILE.read_text())
+                blocked = lock.get("blocked_version", "")
+                if blocked and remote_ver:
+                    def _ver_tuple(v: str) -> tuple:
+                        try:
+                            return tuple(int(x) for x in v.split("."))
+                        except Exception:
+                            return (0,)
+                    if _ver_tuple(remote_ver) <= _ver_tuple(blocked):
+                        return None  # suppress — remote isn't newer than the bad version
+                    else:
+                        # New version clears the lock
+                        REVERT_LOCK_FILE.unlink(missing_ok=True)
+                else:
+                    return None  # can't compare — stay suppressed to be safe
+        except Exception:
+            pass
+
         return local[:7], remote[:7], remote_ver
 
     except Exception:

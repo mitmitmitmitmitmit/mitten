@@ -97,6 +97,7 @@ class NotificationsConfig:
 
 
 DISCORD_PRESENCE_JSON = CONFIG_DIR / "discord_presence.json"
+REVERT_LOCK_FILE = CONFIG_DIR / "revert_lock.json"
 
 
 @dataclass(frozen=True)
