@@ -26,7 +26,6 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-# Register at discord.com/developers/applications → New Application → copy Application ID.
 _CLIENT_ID = "1484018158300823643"
 
 # Presence states — map daemon state strings to (state, details) tuples.

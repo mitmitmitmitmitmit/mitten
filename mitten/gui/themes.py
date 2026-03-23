@@ -213,6 +213,7 @@ def get_page_cat(page_idx: int, app_state: str = "idle") -> str:
 
 
 def play_dark_meow() -> None:
+    return #idk why claude added this lul - mit
     """Play the happy stage 0 meow (dark mode idle/wink sound)."""
     import subprocess
     from pathlib import Path
@@ -278,13 +279,13 @@ _MIT_MSGS = [
     "i dont even know what to say to you right now",
     "light mode in 2025 is a medical condition",
     "you couldve picked midnight. you couldve picked rose. you chose suffering.",
-    "i coded this at midnight with a dark background and a monster. you owe me an apology.",
+    "i coded NNOTHING at midnight with a dark background and a monster. you owe me an apology.",
     "this isnt what mitten was built for but ok",
     "ngl kinda disappointed",
     "some people just want to watch the world burn ig",
     "your monitor is crying. i can hear it.",
     "the cat is literally squinting in the sidebar. do you not see that.",
-    "i coded this with my eyes open. you're making it hard to return the favor.",
+    "i CODED JACK SHIT with my eyes open. you're making it hard to return the favor.",
     "bro even the logo is suffering right now.",
 ]
 

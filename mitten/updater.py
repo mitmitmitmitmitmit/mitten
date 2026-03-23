@@ -19,14 +19,14 @@ from datetime import datetime
 from pathlib import Path
 
 _BANNER = r"""
- /\     /\
+/\     /\
 ( ^.x.^ )   MITTEN AUTO-UPDATER
 (       )
  \_____/
 """
 
 _FATAL_BANNER = r"""
- /\     /\
+/\     /\
 ( x.x.x )   FATAL ERROR
 (       )
  \_____/

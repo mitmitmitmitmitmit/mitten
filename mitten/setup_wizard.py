@@ -16,7 +16,7 @@ import sys
 
 
 _BANNER = r"""
-  /\_____/\
+ /\_____/\
  ( ^.x.^ )   MITTEN
   )     (    replay buffer recorder
  (  ===  )
