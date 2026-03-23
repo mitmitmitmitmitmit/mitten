@@ -11,19 +11,56 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
+
+_LOG_DIR = Path.home() / ".local" / "share" / "mitten" / "logs"
+_FMT = "%(asctime)s  %(levelname)-7s  %(name)s  %(message)s"
+_DATEFMT = "%H:%M:%S"
 
 
 def _setup_logging(verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=level,
-        format="%(asctime)s  %(levelname)-7s  %(name)s  %(message)s",
-        datefmt="%H:%M:%S",
+        format=_FMT,
+        datefmt=_DATEFMT,
     )
+
+
+def _setup_file_logging(current_log: Path, crash_log: Path, verbose: bool) -> None:
+    """Add a file handler for current session and install crashhook to write crash log."""
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    level = logging.DEBUG if verbose else logging.INFO
+
+    root = logging.getLogger()
+    root.setLevel(level)
+
+    fh = logging.FileHandler(current_log, mode="w", encoding="utf-8")
+    fh.setLevel(level)
+    fh.setFormatter(logging.Formatter(_FMT, _DATEFMT))
+    root.addHandler(fh)
+
+    def _crashhook(exc_type, exc_value, exc_tb):
+        import traceback
+        try:
+            crash_log.write_text(
+                "".join(traceback.format_exception(exc_type, exc_value, exc_tb)),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _crashhook
 
 
 def cmd_run(args: argparse.Namespace) -> None:
     _setup_logging(args.verbose)
+    _setup_file_logging(
+        _LOG_DIR / "daemon_current.log",
+        _LOG_DIR / "daemon_crash.log",
+        args.verbose,
+    )
 
     from .config import load_config
     cfg = load_config()
@@ -160,6 +197,12 @@ def cmd_update(args: argparse.Namespace) -> None:
 
 
 def _launch_gui(abuse_reveal: bool = False) -> None:
+    _setup_logging(False)
+    _setup_file_logging(
+        _LOG_DIR / "gui_current.log",
+        _LOG_DIR / "gui_crash.log",
+        False,
+    )
     try:
         from .gui import launch_gui
     except ImportError:

@@ -1604,14 +1604,20 @@ class _DebugPage(QWidget):
 
         log_hdr_row = QHBoxLayout()
         log_hdr_row.setContentsMargins(0, 0, 0, 0)
-        log_hdr_row.setSpacing(10)
-        log_hdr_row.addWidget(_sep("DAEMON LOG"), 1)
-        btn_refresh_log = QPushButton("Refresh")
-        btn_refresh_log.setProperty("class", "secondary")
-        btn_refresh_log.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        btn_refresh_log.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_refresh_log.clicked.connect(self._refresh_log)
-        log_hdr_row.addWidget(btn_refresh_log)
+        log_hdr_row.setSpacing(8)
+        log_hdr_row.addWidget(_sep("LOGS"), 1)
+        for lbl, slot in [
+            ("Daemon log", self._refresh_log),
+            ("Daemon crash", lambda: self._show_crash_log("daemon")),
+            ("GUI log", lambda: self._show_gui_log()),
+            ("GUI crash", lambda: self._show_crash_log("gui")),
+        ]:
+            b = QPushButton(lbl)
+            b.setProperty("class", "secondary")
+            b.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(slot)
+            log_hdr_row.addWidget(b)
         layout.addLayout(log_hdr_row)
         layout.addWidget(_gap(10))
 
@@ -1702,7 +1708,6 @@ class _DebugPage(QWidget):
             self._log_loaded = True
         self._refresh_status()
         self._refresh_metrics()
-        self._switch_main_page(0)
 
     def _test_notification(self) -> None:
         try:
@@ -1823,15 +1828,37 @@ class _DebugPage(QWidget):
             self._log_view.appendPlainText(f"[clear buffer error] {exc}")
 
     def _refresh_log(self) -> None:
+        log_file = Path.home() / ".local" / "share" / "mitten" / "logs" / "daemon_current.log"
         try:
-            result = subprocess.run(
-                ["journalctl", "--user", "-u", "mitten", "-n", "100",
-                 "--no-pager", "--output=short"],
-                capture_output=True, text=True, timeout=10,
-            )
-            text = result.stdout.strip() or "(no log output)"
+            text = log_file.read_text(encoding="utf-8").strip() or "(log is empty)"
+        except FileNotFoundError:
+            text = "(daemon_current.log not found — has the daemon run yet?)"
         except Exception as exc:
-            text = f"(error reading journal: {exc})"
+            text = f"(error reading log: {exc})"
+        self._log_view.setPlainText(text)
+        sb = self._log_view.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def _show_gui_log(self) -> None:
+        log_file = Path.home() / ".local" / "share" / "mitten" / "logs" / "gui_current.log"
+        try:
+            text = log_file.read_text(encoding="utf-8").strip() or "(log is empty)"
+        except FileNotFoundError:
+            text = "(gui_current.log not found)"
+        except Exception as exc:
+            text = f"(error reading log: {exc})"
+        self._log_view.setPlainText(text)
+        sb = self._log_view.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def _show_crash_log(self, which: str) -> None:
+        log_file = Path.home() / ".local" / "share" / "mitten" / "logs" / f"{which}_crash.log"
+        try:
+            text = log_file.read_text(encoding="utf-8").strip() or "(no crash recorded)"
+        except FileNotFoundError:
+            text = f"({which}_crash.log not found — no crash yet)"
+        except Exception as exc:
+            text = f"(error reading crash log: {exc})"
         self._log_view.setPlainText(text)
         sb = self._log_view.verticalScrollBar()
         sb.setValue(sb.maximum())
