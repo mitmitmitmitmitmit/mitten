@@ -587,9 +587,11 @@ class ClipBrowser(QWidget):
         self._table.customContextMenuRequested.connect(self._show_context_menu)
 
         self._splitter.addWidget(self._table)
+        self._splitter.setCollapsible(0, False)
 
         self._player = _PlayerPanel()
         self._splitter.addWidget(self._player)
+        self._splitter.setCollapsible(1, False)
         self._splitter.setSizes([380, 400])
 
         root.addWidget(self._splitter, 1)
