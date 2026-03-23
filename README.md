@@ -51,7 +51,7 @@ i also give claude bad instructions on purpose sometimes just to see what he doe
 
 ## requirements
 
-**OS:** arch-based (arch, cachyos, manjaro, endeavouros). wayland only.
+**OS:** arch based (arch, cachyos, manjaro, endeavouros). wayland only. (developed on cachy os specifically)
 
 you need `gpu-screen-recorder`, `ffmpeg`, and `notify-send`. the setup wizard installs everything, don't worry about it.
 
@@ -98,7 +98,7 @@ systemctl --user status mitten.service
 
 actively used. i clip games with it daily. it hasn't bricked anything for now...
 
-something breaks, open an issue. you fix it, open a pr. there are better odds of me finding love that isn't a femboy twink than me actually reviewing it, which if you knew me, you'd understand is not a high bar.
+something breaks, open an issue. you fix it, open a pr. there are better odds of me finding love that isn't a femboy twink than me actually reviewing it, which if you knew me, you'd understand is not a high bar. if anything ill just tell the robot to go through the issue list and mark down which issues are critical and which are not, non critical ones get put in the to do when i feel like it list.
 ---
 
 ## coming
