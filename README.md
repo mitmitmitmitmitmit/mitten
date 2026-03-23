@@ -4,7 +4,7 @@ a clipping tool that doesn't suck.
 
 keeps a rolling replay buffer on your gpu. press a button, the last N seconds are saved. no cloud, no account, nothing calling home. that's it.
 
-**linux only for now.** windows port is in progress. watch the repo.
+**linux only for now. specifically wayland, dont try to use this on x11 you retard** windows port is in progress. watch the repo.
 
 ---
 
@@ -12,9 +12,11 @@ keeps a rolling replay buffer on your gpu. press a button, the last N seconds ar
 
 medal idles at 20%+ gpu on a 3090. uploads your clips publicly by default. adds itself to startup without asking. one guy called it malware because it reinstalled itself after uninstall. there's a black screen recording bug that's been open for years. they know. they don't care.
 
-also medal is windows-only, so if you're on linux it literally doesn't exist. this does. you're welcome.
+also medal is windows only, so if you're on linux it literally doesn't exist. this does. you're welcome.
 
 mitten hits nvenc/vaapi directly. idles under 300mb ram for a 30s 1080p60 buffer. your gpu doesn't notice it's running.
+
+tdlr its shit brah
 
 ---
 
@@ -22,9 +24,9 @@ mitten hits nvenc/vaapi directly. idles under 300mb ram for a 30s 1080p60 buffer
 
 - **replay buffer**: last N seconds, always rolling. press the button, it saves. you know how this works
 - **game detection**: sees a game launch, starts capture, stops when you close it
-- **session recording**: triple-click to start, triple-click to stop and save. same button, different gesture
+- **session recording**: triple click to start, triple click to stop and save. same button, different gesture
 - **discord compression**: hits the 10mb free limit. two-pass compression locally, your clip never leaves your machine. online tools fumble this. mitten doesn't
-- **vocal trigger** *(coming)*: auto-clips laughs, jumpscares, hype moments. no button needed
+- **vocal trigger** *(coming)*: auto clips laughs, jumpscares, hype moments. no button needed
 - **watermark**: burned in on save. fully customizable. one tiny "mitten" credit stays. it's a solo project, that's literally all it asks. fork it if you want, i'm not your dad
 - **auto-update**: checks for updates on startup, backs up first, rolls back if something breaks
 - **gui**: tray app. clip browser, trim, settings, stats. not electron. i said what i said
@@ -33,7 +35,7 @@ mitten hits nvenc/vaapi directly. idles under 300mb ram for a 30s 1080p60 buffer
 
 ## actually local
 
-zero telemetry. no account. no uploads. no "share with the community" checkbox that's pre-ticked and buried in settings.
+zero telemetry. no account. no uploads. no "share with the community" checkbox that's pre ticked and buried in settings.
 
 clips live on your drive. nothing goes anywhere.
 
@@ -41,7 +43,7 @@ clips live on your drive. nothing goes anywhere.
 
 ## how it's built
 
-i'm an avid stimulant abuser who games daily and breaks his own software doing it. i've bricked my os 5 times messing around with shit i shouldn't. if that doesn't make you trust this software i cooked up in a week or two with my homeboy claude, i don't know what will.
+i'm an avid stimulant abuser who games daily and breaks his own software doing it. i've bricked my os 5 times messing around with shit i shouldn't. if that doesn't make you trust this software i cooked up in a week or two with my homebot claude, i don't know what will.
 
 i also give claude bad instructions on purpose sometimes just to see what he does. he usually figures it out. occasionally he does not. the commits speak for themselves.
 
@@ -94,7 +96,7 @@ systemctl --user status mitten.service
 
 ## status
 
-actively used. i clip games with it daily. it hasn't bricked anything recently.
+actively used. i clip games with it daily. it hasn't bricked anything for now...
 
 something breaks, open an issue. you fix it, open a pr. there are better odds of me finding love that isn't a femboy twink than me actually reviewing it, which if you knew me, you'd understand is not a high bar.
 ---
