@@ -96,6 +96,7 @@ class MittenDaemon:
 
         self._pid_fd = None  # held open for lifetime of process to maintain flock
         self._save_timer: threading.Timer | None = None
+        self._current_game: "GameInfo | None" = None
         self._presence = DiscordPresence()
         # Track daemon's own current state so we can re-assert it when GUI deactivates
         self._daemon_state: str = "idle"
@@ -315,6 +316,11 @@ class MittenDaemon:
             config=self._config,
             on_success=on_success,
             on_failure=on_failure,
+            meta={
+                "saved_manually": True,
+                "clip_type": "clip",
+                "game": self._current_game.name if self._current_game else None,
+            },
         )
 
     def _on_recorder_crash(self, reason: str) -> None:
@@ -383,7 +389,8 @@ class MittenDaemon:
             return "window with Mitten"
         return "desktop with Mitten"
 
-    def _on_game_start(self, game: GameInfo) -> None:
+    def _on_game_start(self, game: "GameInfo") -> None:
+        self._current_game = game
         dc = self._config.discord
         if dc.show_game_name:
             detail = "~( >.x.<)> \u2728" if dc.show_ascii else None
@@ -420,7 +427,8 @@ class MittenDaemon:
                 urgency="low", icon="media-record", timeout_ms=3000,
             )
 
-    def _on_game_stop(self, game: GameInfo) -> None:
+    def _on_game_stop(self, game: "GameInfo") -> None:
+        self._current_game = None
         self._set_presence("idle")
         log.info("Game stopped: %s", game.name)
         if self._config.notifications.enabled:

@@ -8,13 +8,14 @@ is the fallback.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import shutil
 import subprocess
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -32,6 +33,7 @@ def process_clip(
     config: MittenConfig,
     on_success: Callable[[Path, int], None] | None = None,
     on_failure: Callable[[str], None] | None = None,
+    meta: dict | None = None,
 ) -> threading.Thread:
     """
     Spawn a background thread to watermark `raw_path` and move it to save_dir.
@@ -39,7 +41,7 @@ def process_clip(
     """
     t = threading.Thread(
         target=_worker,
-        args=(raw_path, config, on_success, on_failure),
+        args=(raw_path, config, on_success, on_failure, meta or {}),
         name="save-worker",
         daemon=True,
     )
@@ -52,6 +54,7 @@ def _worker(
     config: MittenConfig,
     on_success: Callable | None,
     on_failure: Callable | None,
+    meta: dict,
 ) -> None:
     acquired = _save_semaphore.acquire(timeout=60.0)
     if not acquired:
@@ -61,9 +64,34 @@ def _worker(
             on_failure(msg)
         return
     try:
-        _do_process(raw_path, config, on_success, on_failure)
+        _do_process(raw_path, config, on_success, on_failure, meta)
     finally:
         _save_semaphore.release()
+
+
+def _write_meta(output_path: Path, base_meta: dict, duration_s: int, config: MittenConfig,
+                watermarked: bool, compressed: bool) -> None:
+    """Write a JSON sidecar next to the clip. Never raises."""
+    try:
+        from importlib.metadata import version as _pkg_version
+        mitten_ver = _pkg_version("mitten")
+    except Exception:
+        mitten_ver = "unknown"
+    try:
+        full = {
+            **base_meta,
+            "duration_s": duration_s,
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "mitten_version": mitten_ver,
+            "mode": getattr(config.general, "mode", "desktop"),
+            "watermarked": watermarked,
+            "compressed": compressed,
+            "codec": getattr(config.recorder, "output_codec", "h264"),
+            "size_mb": round(output_path.stat().st_size / (1024 * 1024), 2),
+        }
+        output_path.with_suffix(".json").write_text(json.dumps(full, indent=2))
+    except Exception:
+        pass
 
 
 def _do_process(
@@ -71,6 +99,7 @@ def _do_process(
     config: MittenConfig,
     on_success: Callable | None,
     on_failure: Callable | None,
+    meta: dict,
 ) -> None:
     start_time = time.monotonic()
     if not raw_path.exists() or raw_path.stat().st_size == 0:
@@ -120,6 +149,7 @@ def _do_process(
         if success:
             log.info("Clip saved (no watermark): %s", filename)
             _record_metric(start_time, output_path, auto_compress, raw_path)
+            _write_meta(output_path, meta, actual_seconds, config, watermarked=False, compressed=auto_compress)
             if on_success:
                 on_success(output_path, actual_seconds)
         else:
@@ -154,6 +184,7 @@ def _do_process(
 
         log.info("Clip saved: %s (%.1fMB)", output_path.name, post_mb)
         _record_metric(start_time, output_path, True, None)
+        _write_meta(output_path, meta, actual_seconds, config, watermarked=True, compressed=True)
         if on_success:
             on_success(output_path, actual_seconds)
         return
@@ -210,6 +241,7 @@ def _do_process(
             raw_path.unlink(missing_ok=True)
             log.info("Clip saved (h264+hevc dual): %s", output_path)
             _record_metric(start_time, output_path, False, None)
+            _write_meta(output_path, meta, actual_seconds, config, watermarked=True, compressed=False)
             if on_success:
                 on_success(output_path, actual_seconds)
         except subprocess.TimeoutExpired:
@@ -249,6 +281,7 @@ def _do_process(
 
         log.info("Clip saved: %s", output_path)
         _record_metric(start_time, output_path, False, None)
+        _write_meta(output_path, meta, actual_seconds, config, watermarked=True, compressed=False)
         if on_success:
             on_success(output_path, actual_seconds)
 
