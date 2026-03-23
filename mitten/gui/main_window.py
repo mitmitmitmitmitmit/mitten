@@ -1713,6 +1713,7 @@ class _DebugPage(QWidget):
             self._log_loaded = True
         self._refresh_status()
         self._refresh_metrics()
+        self._switch_main_page(0)
 
     def _test_notification(self) -> None:
         try:
@@ -2388,17 +2389,16 @@ class MittenMainWindow(QMainWindow):
         self._start_anim(f"btn_dip_{id(btn)}", anim)
 
     def _switch_main_page(self, index: int) -> None:
+        for i, btn in enumerate(self._main_nav_buttons):
+            btn.setChecked(i == index)
+        self._nav_debug.setChecked(index == 4)
+        self._mark_gui_presence_dirty()
         if self._pages.currentIndex() == index:
             return
         prev_index = self._pages.currentIndex()
         direction = "right" if index > prev_index else "left"
         self._do_nav_look(direction, dest_page=index)
         self._fade_to(index)
-        for i, btn in enumerate(self._main_nav_buttons):
-            btn.setChecked(i == index)
-        # Debug button (index 4) is outside _main_nav_buttons
-        self._nav_debug.setChecked(index == 4)
-        self._mark_gui_presence_dirty()
 
     def _enter_settings(self) -> None:
         """Fade sidebar from main nav to settings sub-nav."""
