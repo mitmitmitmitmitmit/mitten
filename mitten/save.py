@@ -21,6 +21,9 @@ from typing import Callable
 
 from .config import MittenConfig, TMP_DIR
 from . import notify as _notify
+from .errors import (fmt as _efmt, E_SAVE_SEMAPHORE, E_SAVE_MISSING, E_SAVE_FFMPEG_WM,
+                     E_SAVE_FFMPEG_ENCODE, E_SAVE_MOVE, E_SAVE_FFMPEG_DUAL_HEVC,
+                     E_SAVE_FFMPEG_DUAL_H264)
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +61,7 @@ def _worker(
 ) -> None:
     acquired = _save_semaphore.acquire(timeout=60.0)
     if not acquired:
-        msg = "Watermark job timed out waiting for semaphore"
+        msg = _efmt(E_SAVE_SEMAPHORE, "Save job timed out waiting for semaphore")
         log.warning(msg)
         if on_failure:
             on_failure(msg)
@@ -103,7 +106,7 @@ def _do_process(
 ) -> None:
     start_time = time.monotonic()
     if not raw_path.exists() or raw_path.stat().st_size == 0:
-        msg = f"Raw clip missing or empty: {raw_path.name}"
+        msg = _efmt(E_SAVE_MISSING, f"Raw clip missing or empty: {raw_path.name}")
         log.warning(msg)
         if on_failure:
             on_failure(msg)
@@ -140,7 +143,7 @@ def _do_process(
                 success = True
             except OSError as e:
                 success = False
-                msg = f"Failed to move clip: {e}"
+                msg = _efmt(E_SAVE_MOVE, f"Failed to move clip: {e}")
                 log.error(msg)
                 if on_failure:
                     on_failure(msg)
@@ -155,7 +158,7 @@ def _do_process(
         else:
             output_path.unlink(missing_ok=True)
             if on_failure:
-                on_failure("Encode failed — check journal for details")
+                on_failure(_efmt(E_SAVE_FFMPEG_ENCODE, "Encode failed — check journal for details"))
         return
 
     # ── Watermark path ────────────────────────────────────────────────
@@ -168,7 +171,7 @@ def _do_process(
         if not success:
             output_path.unlink(missing_ok=True)
             if on_failure:
-                on_failure("Encode failed — check journal for details")
+                on_failure(_efmt(E_SAVE_FFMPEG_ENCODE, "Encode failed — check journal for details"))
             return
 
         raw_path.unlink(missing_ok=True)
@@ -209,7 +212,7 @@ def _do_process(
                 log.error("HEVC watermark pass failed: %s", stderr[-300:])
                 hevc_tmp.unlink(missing_ok=True)
                 if on_failure:
-                    on_failure(f"ffmpeg HEVC pass failed: {stderr[-200:]}")
+                    on_failure(_efmt(E_SAVE_FFMPEG_DUAL_HEVC, f"ffmpeg HEVC pass failed: {stderr[-200:]}"))
                 return
 
             log.info("Dual-encode pass 2/2 (H.264 transcode): %s", filename)
@@ -235,7 +238,7 @@ def _do_process(
                 log.error("H.264 transcode pass failed: %s", stderr[-300:])
                 output_path.unlink(missing_ok=True)
                 if on_failure:
-                    on_failure(f"ffmpeg H.264 transcode failed: {stderr[-200:]}")
+                    on_failure(_efmt(E_SAVE_FFMPEG_DUAL_H264, f"ffmpeg H.264 transcode failed: {stderr[-200:]}"))
                 return
 
             raw_path.unlink(missing_ok=True)
@@ -249,7 +252,7 @@ def _do_process(
             output_path.unlink(missing_ok=True)
             log.error("ffmpeg dual-encode timed out")
             if on_failure:
-                on_failure("ffmpeg dual-encode timed out")
+                on_failure(_efmt(E_SAVE_FFMPEG_DUAL_H264, "ffmpeg dual-encode timed out"))
         return
 
     cmd = _build_watermark_cmd(raw_path, output_path, wm, codec=codec, wm_config_cq=cq, light_mode=light_mode)
@@ -274,7 +277,7 @@ def _do_process(
             log.error(msg)
             output_path.unlink(missing_ok=True)
             if on_failure:
-                on_failure(f"ffmpeg error: {stderr[-200:]}")
+                on_failure(_efmt(E_SAVE_FFMPEG_WM, f"ffmpeg error: {stderr[-200:]}"))
             return
 
         raw_path.unlink(missing_ok=True)

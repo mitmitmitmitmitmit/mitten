@@ -20,6 +20,8 @@ from .detect import GameDetector, GameInfo
 from .recorder import GpuRecorder, SessionRecorder
 from .trigger import TriggerListener
 from . import notify, save, sounds
+from .errors import (fmt as _efmt, E_SAVE_TIMEOUT, E_RECORDER_DEAD, E_TRIGGER,
+                      E_RECORDER_CRASH_LIMIT)
 from .discord_presence import DiscordPresence
 
 log = logging.getLogger(__name__)
@@ -257,7 +259,7 @@ class MittenDaemon:
         if self._config.notifications.on_error and self._config.notifications.enabled:
             notify.notify(
                 "~( ^.x.^)>  Mitten — Save May Have Failed",
-                "No clip appeared after 30 seconds",
+                _efmt(E_SAVE_TIMEOUT, "No clip appeared after 30 seconds"),
                 urgency="critical", icon="dialog-warning", timeout_ms=8000,
             )
 
@@ -266,7 +268,7 @@ class MittenDaemon:
         if self._config.notifications.on_error and self._config.notifications.enabled:
             notify.notify(
                 "~( ^.x.^)>  Mitten — Trigger Error",
-                reason,
+                _efmt(E_TRIGGER, reason),
                 urgency="normal", icon="input-mouse", timeout_ms=6000,
             )
 
@@ -334,7 +336,7 @@ class MittenDaemon:
         if self._config.notifications.on_error and self._config.notifications.enabled:
             notify.notify(
                 "~( ^.x.^)>  Mitten — Capture Error",
-                reason,
+                _efmt(E_RECORDER_CRASH_LIMIT if "giving up" in reason else E_RECORDER_DEAD, reason),
                 urgency="critical", icon="dialog-error", timeout_ms=8000,
             )
 

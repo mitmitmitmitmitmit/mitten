@@ -27,7 +27,8 @@ def _setup_logging(verbose: bool) -> None:
     )
 
 
-def _setup_file_logging(current_log: Path, crash_log: Path, verbose: bool) -> None:
+def _setup_file_logging(current_log: Path, crash_log: Path, verbose: bool,
+                         show_dialog: bool = False) -> None:
     """Add a file handler for current session and install crashhook to write crash log."""
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
     level = logging.DEBUG if verbose else logging.INFO
@@ -42,16 +43,108 @@ def _setup_file_logging(current_log: Path, crash_log: Path, verbose: bool) -> No
 
     def _crashhook(exc_type, exc_value, exc_tb):
         import traceback
+        tb_text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
         try:
-            crash_log.write_text(
-                "".join(traceback.format_exception(exc_type, exc_value, exc_tb)),
-                encoding="utf-8",
-            )
+            crash_log.write_text(tb_text, encoding="utf-8")
         except Exception:
             pass
+
+        if show_dialog and not issubclass(exc_type, KeyboardInterrupt):
+            _show_crash_dialog(exc_type, exc_value, tb_text)
+
         sys.__excepthook__(exc_type, exc_value, exc_tb)
 
     sys.excepthook = _crashhook
+
+
+def _show_crash_dialog(exc_type: type, exc_value: BaseException, tb_text: str) -> None:
+    """Show a crash report dialog. Safe to call from sys.excepthook."""
+    import subprocess as _sp
+    try:
+        from PyQt6.QtWidgets import QApplication, QDialog, QVBoxLayout, QHBoxLayout
+        from PyQt6.QtWidgets import QLabel, QPushButton, QPlainTextEdit
+        from PyQt6.QtCore import Qt
+
+        app = QApplication.instance() or QApplication(sys.argv)
+
+        summary = f"{exc_type.__name__}: {exc_value}"
+        if len(summary) > 200:
+            summary = summary[:197] + "..."
+
+        dlg = QDialog()
+        dlg.setWindowTitle("Mitten crashed")
+        dlg.setMinimumWidth(560)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(12)
+        layout.setContentsMargins(24, 20, 24, 20)
+
+        from .errors import E_GUI_CRASH
+        title = QLabel(f"~( >.x.<)>  Mitten crashed  [{E_GUI_CRASH}]")
+        title.setStyleSheet("font-size: 16px; font-weight: 700; color: #f38ba8;")
+        layout.addWidget(title)
+
+        err_lbl = QLabel(summary)
+        err_lbl.setWordWrap(True)
+        err_lbl.setStyleSheet(
+            "font-family: monospace; font-size: 11px; color: #cdd6f4;"
+            "background: #1e1e2e; border-radius: 6px; padding: 10px;"
+        )
+        layout.addWidget(err_lbl)
+
+        tb_view = QPlainTextEdit(tb_text)
+        tb_view.setReadOnly(True)
+        tb_view.setMaximumHeight(180)
+        tb_view.setStyleSheet(
+            "font-family: monospace; font-size: 10px; color: #a6adc8;"
+            "background: #181825; border-radius: 4px; padding: 8px;"
+        )
+        layout.addWidget(tb_view)
+
+        report_lbl = QLabel(
+            "Please open a bug report at "
+            "<a href='https://github.com/mitmitmitmitmitmit/mitten/issues' "
+            "style='color:#cba6f7;'>github.com/mitmitmitmitmitmit/mitten</a>"
+            " with your crash log and a screenshot of this message."
+        )
+        report_lbl.setOpenExternalLinks(True)
+        report_lbl.setWordWrap(True)
+        report_lbl.setStyleSheet("color: #a6adc8; font-size: 11px;")
+        layout.addWidget(report_lbl)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        open_btn = QPushButton("Open log folder")
+        open_btn.setStyleSheet(
+            "QPushButton { background: #45475a; color: #cdd6f4; border: none;"
+            "border-radius: 6px; padding: 7px 16px; font-weight: 600; }"
+            "QPushButton:hover { background: #585b70; }"
+        )
+        open_btn.clicked.connect(
+            lambda: _sp.Popen(
+                ["xdg-open", str(_LOG_DIR)],
+                stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+            )
+        )
+
+        close_btn = QPushButton("Close")
+        close_btn.setStyleSheet(
+            "QPushButton { background: #f38ba8; color: #1e1e2e; border: none;"
+            "border-radius: 6px; padding: 7px 16px; font-weight: 600; }"
+            "QPushButton:hover { background: #eba0ac; }"
+        )
+        close_btn.clicked.connect(dlg.accept)
+
+        btn_row.addWidget(open_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+        dlg.exec()
+    except Exception:
+        pass
 
 
 def cmd_run(args: argparse.Namespace) -> None:
@@ -202,6 +295,7 @@ def _launch_gui(abuse_reveal: bool = False) -> None:
         _LOG_DIR / "gui_current.log",
         _LOG_DIR / "gui_crash.log",
         False,
+        show_dialog=True,
     )
     try:
         from .gui import launch_gui
