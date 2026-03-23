@@ -420,6 +420,7 @@ class _ClipPreview(QFrame):
             f"QFrame {{ background-color: {C.BG}; border-radius: 8px; }}"
         )
         self._clip_path: Path | None = None
+        self._dur_text: str = ""
         self._media_player = None
         self._audio_proc: subprocess.Popen | None = None
         self._dur_prober: _DurProber | None = None
@@ -445,11 +446,11 @@ class _ClipPreview(QFrame):
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
             )
             self._media_player = QMediaPlayer()
+            self._media_player.setLoops(-1)  # infinite loop, no black flash
             audio = QAudioOutput()
             audio.setVolume(0)   # muted — just a living thumbnail
             self._media_player.setAudioOutput(audio)
             self._media_player.setVideoOutput(self._player_widget)
-            self._media_player.mediaStatusChanged.connect(self._on_status)
             layout.addWidget(self._player_widget, 1)
         except ImportError:
             self._player_widget = None
@@ -466,18 +467,11 @@ class _ClipPreview(QFrame):
         self._name_label.setStyleSheet(
             f"color: {C.SUBTEXT}; font-size: 11px;"
             f"padding: 6px 12px;"
-            f"background: {_hex_rgba(C.BG, 0.7)};"
+            f"background: {C.SURFACE};"
             f"border-radius: 0 0 8px 8px;"
         )
         layout.addWidget(self._name_label)
-
-        self._dur_badge = QLabel(self)
-        self._dur_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._dur_badge.setStyleSheet(
-            "background: rgba(0,0,0,0.55); color: white; font-size: 10px;"
-            "font-weight: 600; border-radius: 10px; padding: 2px 8px;"
-        )
-        self._dur_badge.hide()
+        self._dur_text: str = ""
 
         self._play_icon = QLabel("▶", self)
         self._play_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -495,10 +489,6 @@ class _ClipPreview(QFrame):
     def _reposition_overlays(self) -> None:
         name_h = 32  # approximate name strip height
         w, h = self.width(), self.height()
-        # Duration badge: bottom-right, just above name strip
-        bw = max(self._dur_badge.sizeHint().width(), 50)
-        self._dur_badge.setGeometry(w - bw - 10, h - name_h - 26, bw, 22)
-        self._dur_badge.raise_()
         # Play icon: centered in video area above name strip
         self._play_icon.move((w - 56) // 2, (h - name_h - 56) // 2)
         self._play_icon.raise_()
@@ -542,6 +532,10 @@ class _ClipPreview(QFrame):
 
     def set_clip(self, path: Path | None) -> None:
         if path == self._clip_path:
+            if self._dur_text:
+                self._dur_badge.setText(self._dur_text)
+                self._dur_badge.show()
+                self._reposition_overlays()
             return
         self._audio_stop_timer.stop()
         self._stop_audio()
@@ -576,6 +570,7 @@ class _ClipPreview(QFrame):
 
     def _on_dur_ready(self, dur_str: str) -> None:
         if dur_str:
+            self._dur_text = dur_str
             self._dur_badge.setText(dur_str)
             self._dur_badge.show()
             self._reposition_overlays()
@@ -2276,6 +2271,26 @@ class MittenMainWindow(QMainWindow):
             ("scrolling through the vault", "scrolling through the vault"),
             ("looking for a banger", "looking for a banger"),
             ("checking old clips", "checking the old clips"),
+            ("on a nostalgia trip", "on a nostalgia trip"),
+        ],
+        "clips_watching": [
+            ("watching a clip", "watching a clip"),
+            ("rewatching that one", "rewatching that one"),
+            ("vibing to a clip", "vibing to a clip"),
+            ("locked in on this clip", "locked in on this clip"),
+            ("this clip goes hard", "this clip goes hard"),
+            ("can't stop watching this", "can't stop watching this"),
+            ("found a banger", "found a banger"),
+            ("on repeat", "this one's on repeat"),
+            ("clip inspection mode", "clip inspection mode"),
+        ],
+        "clips_startled": [
+            ("a clip just dropped", "a clip just dropped"),
+            ("new clip!", "new clip just landed"),
+            ("clip incoming", "clip incoming"),
+            ("mitten caught something", "mitten caught something"),
+            ("fresh clip", "fresh clip just saved"),
+            ("got one", "got one"),
         ],
         "settings_general": [
             ("tweaking general settings", "tweaking general settings"),
