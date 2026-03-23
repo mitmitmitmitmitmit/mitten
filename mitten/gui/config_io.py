@@ -58,6 +58,7 @@ fontcolor = {_q(wm.fontcolor)}
 position = {_q(wm.position)}
 padding = {wm.padding}
 intro_name = {_q(wm.intro_name)}
+anim_enabled = {_bool(wm.anim_enabled)}
 
 [game_detection]
 enabled = {_bool(gd.enabled)}

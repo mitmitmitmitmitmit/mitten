@@ -1200,9 +1200,70 @@ class SettingsDialog(QWidget):
     def _make_watermark_tab(self) -> QWidget:
         page, form = self._page_wrapper()
 
-        self._wm_enabled = QCheckBox("Enable watermark on saved clips")
+        # ── Hardcoded watermark notice ─────────────────────────────────────────
+        form.addRow(_sep("HARDCODED WATERMARK"))
+
+        hc_frame = QFrame()
+        hc_frame.setStyleSheet(
+            f"QFrame {{ background: {_hex_rgba(C.SURFACE, 0.45)};"
+            f"border: 1px solid {_hex_rgba(C.BORDER, 0.3)};"
+            f"border-radius: 8px; }}"
+        )
+        hc_layout = QVBoxLayout(hc_frame)
+        hc_layout.setContentsMargins(14, 10, 14, 12)
+        hc_layout.setSpacing(4)
+
+        hc_title = QLabel("mitten  \u00b7  always on")
+        hc_title.setStyleSheet(
+            f"color: {_hex_rgba(C.TEXT, 0.45)}; font-size: 11px; font-weight: 700;"
+            f"background: transparent; border: none;"
+        )
+        hc_layout.addWidget(hc_title)
+
+        hc_desc = QLabel(
+            "Mitten is a freemium tool. Every saved clip includes a hardcoded \u201cmitten\u201d "
+            "watermark and optional intro animation that cannot be removed. "
+            "You can add your own watermark on top."
+        )
+        hc_desc.setWordWrap(True)
+        hc_desc.setStyleSheet(
+            f"color: {_hex_rgba(C.SUBTEXT, 0.6)}; font-size: 10px;"
+            f"background: transparent; border: none;"
+        )
+        hc_layout.addWidget(hc_desc)
+        form.addRow("", hc_frame)
+
+        # ── Preview frame ──────────────────────────────────────────────────────
+        form.addRow(_sep("PREVIEW"))
+
+        self._wm_preview = QFrame()
+        self._wm_preview.setMinimumHeight(110)
+        self._wm_preview.setStyleSheet(
+            f"QFrame {{ background: #111118; border-radius: 8px;"
+            f"border: 1px solid {_hex_rgba(C.BORDER, 0.25)}; }}"
+        )
+        prev_layout = QVBoxLayout(self._wm_preview)
+        prev_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._wm_preview_label = QLabel()
+        self._wm_preview_label.setAlignment(
+            Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight
+        )
+        self._wm_preview_label.setWordWrap(False)
+        self._wm_preview_label.setStyleSheet(
+            "color: rgba(255,255,255,0.6); font-size: 12px;"
+            "background: transparent; border: none; padding: 10px;"
+        )
+        prev_layout.addWidget(self._wm_preview_label, 1)
+        form.addRow("", self._wm_preview)
+
+        # ── Your watermark ─────────────────────────────────────────────────────
+        form.addRow(_sep("YOUR WATERMARK"))
+
+        self._wm_enabled = QCheckBox("Enable your watermark on saved clips")
         self._wm_enabled.setChecked(True)
         self._wm_enabled.toggled.connect(self._toggle_watermark_fields)
+        self._wm_enabled.toggled.connect(self._update_wm_preview)
         form.addRow("", self._wm_enabled)
 
         self._wm_text = QLineEdit("~( ^.x.^)> caught by mitten")
@@ -1212,9 +1273,11 @@ class SettingsDialog(QWidget):
                 self._wm_text.setPlaceholderText(get_abuse())
         except Exception:
             pass
+        self._wm_text.textChanged.connect(self._update_wm_preview)
         form.addRow("Text", self._wm_text)
 
         self._wm_subtext = QLineEdit("programmed by mit")
+        self._wm_subtext.textChanged.connect(self._update_wm_preview)
         form.addRow("Subtext", self._wm_subtext)
 
         self._wm_fontfamily = QComboBox()
@@ -1263,6 +1326,7 @@ class SettingsDialog(QWidget):
         self._wm_position.addItems([
             "bottom_right", "bottom_left", "top_right", "top_left",
         ])
+        self._wm_position.currentTextChanged.connect(self._update_wm_preview)
         form.addRow("Position", self._wm_position)
 
         self._wm_padding = QSpinBox()
@@ -1271,13 +1335,18 @@ class SettingsDialog(QWidget):
         self._wm_padding.setValue(20)
         form.addRow("Padding", self._wm_padding)
 
+        # ── Animation ──────────────────────────────────────────────────────────
         form.addRow(_sep("ANIMATION"))
 
+        self._wm_anim_enabled = QCheckBox("Enable intro animation")
+        self._wm_anim_enabled.setChecked(True)
+        self._wm_anim_enabled.toggled.connect(self._toggle_anim_fields)
+        form.addRow("", self._wm_anim_enabled)
+
         anim_desc = QLabel(
-            "Every saved clip starts with a Mitten intro: "
-            "M fades in → letters pop out forming MITTEN → v0.3 fades in below → "
-            "fades out → your watermark appears → "
-            "\u201cClipped by [name] on [OS]\u201d fades in."
+            "M fades in \u2192 i\u00b7t\u00b7t\u00b7e\u00b7n pop out forming MITTEN \u2192 "
+            "v0.3 + \u201cClipped by [name] on [OS]\u201d \u2192 fades to watermark. "
+            "Disable to use a static hardcoded watermark only."
         )
         anim_desc.setWordWrap(True)
         anim_desc.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px; font-style: italic;")
@@ -1301,10 +1370,33 @@ class SettingsDialog(QWidget):
         self._wm_fields = [
             self._wm_text, self._wm_subtext, self._wm_fontfamily,
             self._wm_fontsize, self._wm_fontcolor, self._wm_position,
-            self._wm_padding, self._wm_anim_style, self._wm_intro_name,
+            self._wm_padding,
         ]
+        self._wm_anim_fields = [self._wm_anim_style, self._wm_intro_name]
 
+        self._update_wm_preview()
         return page
+
+    def _update_wm_preview(self) -> None:
+        """Refresh the live watermark preview label."""
+        try:
+            enabled = self._wm_enabled.isChecked()
+            text    = self._wm_text.text() if enabled else ""
+            subtext = self._wm_subtext.text() if enabled else ""
+            pos     = self._wm_position.currentText() if enabled else "bottom_right"
+
+            # Always show the hardcoded mitten watermark
+            hc = "mitten"
+            user_part = f"{text}\n{subtext}" if text or subtext else ""
+            combined = f"{hc}\n{user_part}".strip() if user_part else hc
+
+            # Position alignment
+            h_align = Qt.AlignmentFlag.AlignRight if "right" in pos else Qt.AlignmentFlag.AlignLeft
+            v_align = Qt.AlignmentFlag.AlignBottom if "bottom" in pos else Qt.AlignmentFlag.AlignTop
+            self._wm_preview_label.setAlignment(h_align | v_align)
+            self._wm_preview_label.setText(combined)
+        except Exception:
+            pass
 
     def _make_games_tab(self) -> QWidget:
         page, form = self._page_wrapper()
@@ -1514,6 +1606,10 @@ class SettingsDialog(QWidget):
         for w in self._wm_fields:
             w.setEnabled(checked)
 
+    def _toggle_anim_fields(self, checked: bool) -> None:
+        for w in self._wm_anim_fields:
+            w.setEnabled(checked)
+
     def _toggle_notify_fields(self, checked: bool) -> None:
         for w in (self._notif_start, self._notif_save, self._notif_error):
             w.setEnabled(checked)
@@ -1659,7 +1755,9 @@ class SettingsDialog(QWidget):
         self._wm_position.setCurrentText(wm.position)
         self._wm_padding.setValue(wm.padding)
         self._wm_intro_name.setText(wm.intro_name)
+        self._wm_anim_enabled.setChecked(wm.anim_enabled)
         self._toggle_watermark_fields(wm.enabled)
+        self._toggle_anim_fields(wm.anim_enabled)
 
         gd = cfg.game_detection
         self._gd_poll.setValue(gd.poll_interval)
@@ -1908,6 +2006,7 @@ class SettingsDialog(QWidget):
                 position=self._wm_position.currentText(),
                 padding=self._wm_padding.value(),
                 intro_name=self._wm_intro_name.text().strip(),
+                anim_enabled=self._wm_anim_enabled.isChecked(),
             ),
             game_detection=GameDetectionConfig(
                 enabled=True,
