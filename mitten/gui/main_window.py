@@ -38,6 +38,10 @@ from PyQt6.QtWidgets import (
 
 from .resources import C, CAT, CAT_FONT, CATS, paw_icon, _accent_rgba, _accent_hover, _hex_rgba
 from ..daemon_utils import get_daemon_pid, toggle_daemon, toggle_pause
+
+# How long (ms) to wait before firing a save after the first click.
+# Prevents accidental double-triggers from triple-click gestures.
+_SAVE_DEBOUNCE_MS = 400
 from ..config import PAUSE_FILE, RECORDER_DEAD_FILE
 from ..utils import format_duration, get_vram_usage
 
@@ -1329,6 +1333,10 @@ class _DebugPage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
+        # Save-button debounce state
+        self._force_save_btn: QPushButton | None = None
+        self._save_debounce_timer: QTimer | None = None
+
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
 
@@ -1528,11 +1536,27 @@ class _DebugPage(QWidget):
             self._test_notification,
         ))
         layout.addWidget(_gap(8))
-        layout.addWidget(_action_row(
-            "Force-save a clip now — sends SIGUSR1 to the recorder (same as the trigger button)",
-            "Force save clip now",
-            self._force_save,
-        ))
+        # Force-save row built inline so we can keep a button reference for debounce feedback.
+        _fs_frame, _fs_fl = _card_frame()
+        _fs_col = QVBoxLayout()
+        _fs_col.setSpacing(2)
+        _fs_dl = QLabel(
+            "Force-save a clip now — sends SIGUSR1 to the recorder (same as the trigger button)"
+        )
+        _fs_dl.setStyleSheet(
+            f"color: {C.TEXT}; font-size: 12px; background: transparent; border: none;"
+        )
+        _fs_dl.setWordWrap(True)
+        _fs_col.addWidget(_fs_dl)
+        _fs_fl.addLayout(_fs_col, 1)
+        _fs_btn = QPushButton("Force save clip now")
+        _fs_btn.setProperty("class", "secondary")
+        _fs_btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        _fs_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        _fs_btn.clicked.connect(self._force_save)
+        _fs_fl.addWidget(_fs_btn)
+        self._force_save_btn = _fs_btn
+        layout.addWidget(_fs_frame)
 
         layout.addWidget(_gap(24))
         layout.addWidget(_divider())
@@ -1721,17 +1745,46 @@ class _DebugPage(QWidget):
             self._log_view.appendPlainText(f"[notification error] {exc}")
 
     def _force_save(self) -> None:
-        """Send SIGUSR1 to the recorder PID to trigger a clip save."""
+        """Debounced save trigger — waits _SAVE_DEBOUNCE_MS before firing SIGUSR1.
+
+        The first click starts a timer and disables the button (showing "saving…").
+        Any additional clicks within the window are ignored.  Once the timer fires,
+        the actual signal is sent and the button is re-enabled.  This prevents
+        triple-click "select-all" gestures from queuing a second unintended save.
+        """
+        if self._save_debounce_timer is not None and self._save_debounce_timer.isActive():
+            # A save is already pending — swallow the extra click.
+            return
+
+        # Disable the button immediately for visual feedback.
+        if self._force_save_btn is not None:
+            self._force_save_btn.setText("saving…")
+            self._force_save_btn.setEnabled(False)
+
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(self._do_force_save)
+        self._save_debounce_timer = timer
+        timer.start(_SAVE_DEBOUNCE_MS)
+
+    def _do_force_save(self) -> None:
+        """Actually send SIGUSR1 after the debounce window has elapsed."""
         try:
             import os, signal as _signal
             pid = get_daemon_pid()
             if pid is None:
                 self._log_view.appendPlainText("[force save] daemon is not running")
-                return
-            os.kill(pid, _signal.SIGUSR1)
-            self._log_view.appendPlainText(f"[force save] SIGUSR1 sent to PID {pid}")
+            else:
+                os.kill(pid, _signal.SIGUSR1)
+                self._log_view.appendPlainText(f"[force save] SIGUSR1 sent to PID {pid}")
         except Exception as exc:
             self._log_view.appendPlainText(f"[force save error] {exc}")
+        finally:
+            # Re-enable the button regardless of outcome.
+            if self._force_save_btn is not None:
+                self._force_save_btn.setText("Force save clip now")
+                self._force_save_btn.setEnabled(True)
+            self._save_debounce_timer = None
 
     def _open_config(self) -> None:
         from ..config import CONFIG_FILE
