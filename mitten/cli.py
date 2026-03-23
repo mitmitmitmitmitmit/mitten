@@ -143,6 +143,41 @@ def _show_crash_dialog(exc_type: type, exc_value: BaseException, tb_text: str) -
             )
         )
 
+        revert_btn = QPushButton("Revert to previous version")
+        revert_btn.setStyleSheet(
+            "QPushButton { background: #fab387; color: #1e1e2e; border: none;"
+            "border-radius: 6px; padding: 7px 16px; font-weight: 600; }"
+            "QPushButton:hover { background: #f9c096; }"
+        )
+
+        def _do_revert() -> None:
+            revert_btn.setEnabled(False)
+            revert_btn.setText("reverting…")
+            try:
+                from .updater import restore_backup, get_repo_dir
+                import subprocess as _sub
+                repo = get_repo_dir()
+                ok = repo is not None and restore_backup(repo)
+                if ok:
+                    _sub.run(
+                        [sys.executable, "-m", "pip", "install", "-e", ".",
+                         "--break-system-packages", "-q"],
+                        cwd=repo, capture_output=True,
+                    )
+                    _sub.Popen(
+                        ["systemctl", "--user", "restart", "mitten.service"],
+                        stdout=_sub.DEVNULL, stderr=_sub.DEVNULL,
+                    )
+                    revert_btn.setText("reverted — relaunch mitten")
+                else:
+                    revert_btn.setText("no backup found")
+                    revert_btn.setEnabled(True)
+            except Exception as _e:
+                revert_btn.setText(f"failed: {_e}")
+                revert_btn.setEnabled(True)
+
+        revert_btn.clicked.connect(_do_revert)
+
         close_btn = QPushButton("Close")
         close_btn.setStyleSheet(
             "QPushButton { background: #f38ba8; color: #1e1e2e; border: none;"
@@ -152,6 +187,7 @@ def _show_crash_dialog(exc_type: type, exc_value: BaseException, tb_text: str) -
         close_btn.clicked.connect(dlg.accept)
 
         btn_row.addWidget(open_btn)
+        btn_row.addWidget(revert_btn)
         btn_row.addStretch()
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)

@@ -72,6 +72,14 @@ mitten
 
 `--break-system-packages` is required on arch. it's safe, mitten's deps don't conflict with system packages.
 
+if `mitten` isn't found after install, your shell's PATH doesn't include `~/.local/bin`. fix it:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+# or for zsh:
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+```
+
 first run launches the setup wizard automatically: installs missing deps, adds you to the `input` group, writes a default config, sets up the systemd service. you don't need to touch a terminal again after that.
 
 ---
