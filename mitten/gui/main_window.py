@@ -532,24 +532,18 @@ class _ClipPreview(QFrame):
 
     def set_clip(self, path: Path | None) -> None:
         if path == self._clip_path:
-            if self._dur_text:
-                self._dur_badge.setText(self._dur_text)
-                self._dur_badge.show()
-                self._reposition_overlays()
             return
         self._audio_stop_timer.stop()
         self._stop_audio()
         self._clip_path = path
-        self._dur_badge.hide()
+        self._dur_text = ""
         self._play_icon.hide()
         if self._dur_prober and self._dur_prober.isRunning():
             self._dur_prober.quit()
             self._dur_prober.wait(2000)
         self._dur_prober = None
         if path and path.exists():
-            size_mb = path.stat().st_size / (1024 * 1024)
-            short = path.stem.replace("mitten_", "").replace("_", " ")
-            self._name_label.setText(f"{short}  \u00b7  {size_mb:.1f} MB")
+            self._update_name_label()
             if self._media_player:
                 self._media_player.setSource(QUrl.fromLocalFile(str(path)))
                 self._media_player.play()
@@ -561,25 +555,25 @@ class _ClipPreview(QFrame):
             if self._media_player:
                 self._media_player.stop()
 
+    def _update_name_label(self) -> None:
+        if not self._clip_path:
+            return
+        size_mb = self._clip_path.stat().st_size / (1024 * 1024)
+        short = self._clip_path.stem.replace("mitten_", "").replace("_", " ")
+        dur = f"  \u00b7  {self._dur_text}" if self._dur_text else ""
+        self._name_label.setText(f"{short}  \u00b7  {size_mb:.1f} MB{dur}")
+
     def set_saving(self) -> None:
         """Show a placeholder while a clip is being processed."""
         self._name_label.setText("saving your clip\u2026")
-        self._dur_badge.hide()
+        self._dur_text = ""
         if self._media_player:
             self._media_player.stop()
 
     def _on_dur_ready(self, dur_str: str) -> None:
         if dur_str:
             self._dur_text = dur_str
-            self._dur_badge.setText(dur_str)
-            self._dur_badge.show()
-            self._reposition_overlays()
-
-    def _on_status(self, status) -> None:
-        from PyQt6.QtMultimedia import QMediaPlayer
-        if status == QMediaPlayer.MediaStatus.EndOfMedia:
-            self._media_player.setPosition(0)
-            self._media_player.play()
+            self._update_name_label()
 
 
 def _section_header(text: str) -> QLabel:
