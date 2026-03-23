@@ -45,6 +45,7 @@ class TriggerListener:
         self._shutdown = threading.Event()
         self._last_trigger: float = 0.0
         self._click_times: list[float] = []  # for triple-click detection
+        self._pending_timer: threading.Timer | None = None
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -88,6 +89,9 @@ class TriggerListener:
 
     def stop(self) -> None:
         self._shutdown.set()
+        if self._pending_timer is not None:
+            self._pending_timer.cancel()
+            self._pending_timer = None
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2)
 
@@ -154,22 +158,35 @@ class TriggerListener:
         self._click_times.append(now)
         self._click_times = [t for t in self._click_times if now - t <= 0.6]
 
-        # Triple-click: 3 presses within 600ms
+        # Triple-click: 3 presses within 600ms — cancel any pending single-click save
         if len(self._click_times) >= 3 and self._on_triple_trigger:
             log.info("Triple-click detected — toggling session recording")
             self._click_times.clear()
             self._last_trigger = now  # reset cooldown
+            if self._pending_timer is not None:
+                self._pending_timer.cancel()
+                self._pending_timer = None
             try:
                 self._on_triple_trigger()
             except Exception as e:
                 log.error("on_triple_trigger callback raised: %s", e)
             return
 
-        # Normal single-click with cooldown
+        # Normal single-click with cooldown — debounced 400ms so rapid re-clicks
+        # don't double-fire before the triple-click window closes
         if now - self._last_trigger < self._cooldown:
             log.debug("Trigger ignored (cooldown)")
             return
         self._last_trigger = now
+        if self._pending_timer is not None:
+            self._pending_timer.cancel()
+        t = threading.Timer(0.4, self._dispatch_single)
+        t.daemon = True
+        self._pending_timer = t
+        t.start()
+
+    def _dispatch_single(self) -> None:
+        self._pending_timer = None
         log.info("Trigger fired!")
         try:
             self._on_trigger()
