@@ -1353,7 +1353,10 @@ class SettingsDialog(QWidget):
         form.addRow("", anim_desc)
 
         self._wm_anim_style = QComboBox()
-        self._wm_anim_style.addItems(["Classic", "Typewriter", "Scatter", "Glitch"])
+        self._wm_anim_style.addItems([
+            "Snap", "Ripple", "Typewriter", "Broadcast",
+            "Shatter", "Glitch", "Rise", "Flashframe",
+        ])
         form.addRow("Animation style", self._wm_anim_style)
 
         self._wm_intro_name = QLineEdit()
