@@ -1866,6 +1866,7 @@ class MittenMainWindow(QMainWindow):
         self._gui_clip_path: object = None
         self._gui_clip_dur: int = 0
         self._gui_dc_preview: object = None  # live DiscordConfig from settings widgets
+        self._gui_presence_msg: str = ""     # cached random message, refreshed on navigation
 
         try:
             from .system_setup import check_dependencies
@@ -2255,13 +2256,92 @@ class MittenMainWindow(QMainWindow):
         except Exception:
             pass
 
+    # Random message pools — (state_line, detail_suffix) per context key
+    _PRESENCE_MSGS: dict[str, list[tuple[str, str]]] = {
+        "dashboard": [
+            ("chilling on the dashboard", "chilling on the dashboard"),
+            ("staring at the dashboard", "staring at the dashboard"),
+            ("vibing on the dashboard", "vibing on the dashboard"),
+            ("dashboard mode", "just hanging on the dashboard"),
+            ("keeping an eye on things", "keeping an eye on things"),
+            ("watching the numbers", "watching the numbers go up"),
+            ("doing dashboard things", "doing dashboard things"),
+            ("lurking on the dashboard", "lurking on the dashboard"),
+        ],
+        "clips": [
+            ("browsing clips", "browsing through clips"),
+            ("going through the archive", "going through the archive"),
+            ("digging through clips", "digging through clips"),
+            ("clip hunting", "clip hunting"),
+            ("scrolling through the vault", "scrolling through the vault"),
+            ("looking for a banger", "looking for a banger"),
+            ("checking old clips", "checking the old clips"),
+        ],
+        "settings_general": [
+            ("tweaking general settings", "tweaking general settings"),
+            ("messing with general config", "messing with general config"),
+            ("getting the basics right", "getting the basics right"),
+            ("adjusting the general stuff", "adjusting the general stuff"),
+        ],
+        "settings_recording": [
+            ("messing with recording settings", "messing with recording settings"),
+            ("tweaking the buffer", "tweaking the buffer"),
+            ("dialing in the recording", "dialing in the recording config"),
+            ("getting the recording right", "getting the recording right"),
+            ("adjusting the capture settings", "adjusting the capture settings"),
+        ],
+        "settings_compression": [
+            ("messing with compression", "messing with compression"),
+            ("tweaking the file sizes", "tweaking the file sizes"),
+            ("dialing in compression", "dialing in compression settings"),
+            ("adjusting output quality", "adjusting output quality"),
+        ],
+        "settings_watermark": [
+            ("editing the watermark", "editing the watermark"),
+            ("branding the clips", "branding the clips"),
+            ("messing with the watermark", "messing with the watermark"),
+            ("customizing the tag", "customizing the tag"),
+            ("putting their name on it", "putting their name on it"),
+        ],
+        "settings_games": [
+            ("configuring game detection", "configuring game detection"),
+            ("setting up game mode", "setting up game mode"),
+            ("adding games to the list", "adding games to the list"),
+            ("tweaking game detection", "tweaking game detection"),
+        ],
+        "settings_discord": [
+            ("tweaking discord presence", "tweaking discord presence"),
+            ("messing with the rich presence", "messing with the rich presence"),
+            ("editing what discord shows", "editing what discord shows"),
+            ("customizing the discord card", "customizing the discord card"),
+        ],
+        "about": [
+            ("reading about Mitten", "reading about Mitten"),
+            ("checking the about page", "checking the about page"),
+            ("reading the docs", "reading the docs"),
+            ("learning about Mitten", "learning about Mitten"),
+            ("checking the changelog", "checking the changelog"),
+            ("seeing what's new", "seeing what's new"),
+        ],
+        "debug": [
+            ("poking around in debug", "poking around in debug mode"),
+            ("debug mode activated", "debug mode activated"),
+            ("looking at the logs", "looking at the logs"),
+            ("something is broken probably", "something is broken probably"),
+            ("investigating something", "investigating something"),
+        ],
+    }
+
+    def _pick_presence_msg(self, key: str) -> tuple[str, str]:
+        import random
+        pool = self._PRESENCE_MSGS.get(key, [("in Mitten", "in Mitten")])
+        return random.choice(pool)
+
     def _gui_presence_strings(self, page: int, dc) -> tuple[str, str, str]:
         """Return (state_override, detail_override, name_override) for current GUI context."""
         from .themes import (
             get_state_cat,
-            DARK_CAT_IDLE, DARK_CAT_SLEEPY, DARK_CAT_ABOUT, DARK_CAT_DEBUG,
-            DARK_CAT_SETTINGS, DARK_CAT_VIBE_1, DARK_CAT_VIBE_2, DARK_CAT_VIBE_3,
-            DARK_CAT_STARTLED,
+            DARK_CAT_IDLE, DARK_CAT_SLEEPY, DARK_CAT_VIBE_1, DARK_CAT_STARTLED,
         )
 
         def _cat(state: str) -> str:
@@ -2269,11 +2349,11 @@ class MittenMainWindow(QMainWindow):
 
         if page == 0:  # Dashboard
             cat = get_state_cat(self._state) if dc.animated_ascii else DARK_CAT_IDLE
-            return "on the dashboard", f"{cat}  on the dashboard", "customizing Mitten"
+            state_txt, detail_txt = self._pick_presence_msg("dashboard")
+            return state_txt, f"{cat}  {detail_txt}", "customizing Mitten"
 
         elif page == 1:  # Clips
             cat_state = self._gui_cat_state
-            # Build clip detail suffix from path + duration
             clip_suffix = ""
             try:
                 if self._gui_clip_path is not None:
@@ -2294,21 +2374,28 @@ class MittenMainWindow(QMainWindow):
             elif cat_state == "startled":
                 return f"watching a clip{clip_suffix}", f"{DARK_CAT_STARTLED}  a clip just dropped{clip_suffix}", "watching a clip with Mitten"
             else:
-                return "browsing clips", f"{DARK_CAT_SLEEPY}  browsing clips", "customizing Mitten"
+                state_txt, detail_txt = self._pick_presence_msg("clips")
+                return state_txt, f"{DARK_CAT_SLEEPY}  {detail_txt}", "customizing Mitten"
 
         elif page == 2:  # Settings
+            _section_keys = ["settings_general", "settings_recording", "settings_compression",
+                             "settings_watermark", "settings_games", "settings_discord"]
+            key = _section_keys[self._gui_settings_idx] if self._gui_settings_idx < len(_section_keys) else "settings_general"
             _sections = ["general", "recording", "compression", "watermark", "games", "discord"]
             section = _sections[self._gui_settings_idx] if self._gui_settings_idx < len(_sections) else "settings"
             cat = _cat("settings")
-            return f"in settings \u2014 {section}", f"{cat}  tweaking settings", "customizing Mitten"
+            state_txt, detail_txt = self._pick_presence_msg(key)
+            return f"in settings \u2014 {section}", f"{cat}  {detail_txt}", "customizing Mitten"
 
         elif page == 3:  # About
             cat = _cat("about")
-            return "about", f"{cat}  reading about Mitten", "customizing Mitten"
+            state_txt, detail_txt = self._pick_presence_msg("about")
+            return state_txt, f"{cat}  {detail_txt}", "customizing Mitten"
 
         elif page == 4:  # Debug
             cat = _cat("debug")
-            return "debug mode", f"{cat}  in debug mode", "customizing Mitten"
+            state_txt, detail_txt = self._pick_presence_msg("debug")
+            return state_txt, f"{cat}  {detail_txt}", "customizing Mitten"
 
         return "in Mitten", f"{DARK_CAT_IDLE}  in Mitten", "customizing Mitten"
 
