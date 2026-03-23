@@ -110,4 +110,4 @@ something breaks, open an issue. you fix it, open a pr. there are better odds of
 
 ## license
 
-MIT. do whatever you want with it, just don't make it worse.
+MIT. do whatever you want with it, just don't make it worse. if you do ill fucking kill you. im being so serious (not really)
