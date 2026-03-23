@@ -2013,6 +2013,13 @@ class MittenMainWindow(QMainWindow):
 
         self._nav_back = _NavButton("\u2190  Back")
         self._nav_back.setVisible(False)
+        self._nav_back.setStyleSheet(
+            f"QPushButton {{ background-color: transparent; color: {C.TEXT};"
+            f"border: none; text-align: left; padding-left: 20px;"
+            f"font-size: 13px; font-weight: 600; border-radius: 0; }}"
+            f"QPushButton:hover {{ color: {C.LAVENDER};"
+            f"background-color: rgba(255,255,255,0.05); }}"
+        )
 
         self._settings_nav_buttons: list[_NavButton] = []
         for name in ["General", "Recording", "Compression", "Watermark", "Games", "Discord"]:
@@ -2421,6 +2428,7 @@ class MittenMainWindow(QMainWindow):
             self._logo_label.setText(_t.get_page_cat(self._previous_page_idx, app_state=self._state))
         except Exception:
             pass
+        self._mark_gui_presence_dirty()
 
     def _fade_sidebar(self, show_settings: bool) -> None:
         from .anim import staggered_fade
