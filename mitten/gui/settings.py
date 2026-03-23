@@ -1200,62 +1200,29 @@ class SettingsDialog(QWidget):
     def _make_watermark_tab(self) -> QWidget:
         page, form = self._page_wrapper()
 
+        _ANIM_STYLE_DESCS: dict[str, str] = {
+            "Snap":       "M fades in \u2192 i\u00b7t\u00b7t\u00b7e\u00b7n slam into place with an overshoot snap \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
+            "Ripple":     "M fades in \u2192 letters ripple in with a scale pulse wave left-to-right \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
+            "Typewriter": "M appears \u2192 i\u00b7t\u00b7t\u00b7e\u00b7n type in instantly one-by-one, cursor blinks after N \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
+            "Broadcast":  "MITTEN materializes from a wide horizontal smear expanding vertically, CRT scan-in style \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
+            "Shatter":    "Letters converge simultaneously \u2014 odd from left, even from right \u2014 snapping to position \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
+            "Glitch":     "Letters flicker in with rapid alpha oscillation and horizontal jitter, corrupted signal aesthetic \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
+            "Rise":       "MITTEN drifts upward into place from staggered vertical offsets, slow and cinematic \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
+            "Flashframe": "Letters burst in with a white bloom flash that decays instantly, like a camera shutter moment \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
+        }
+
         # ── Hardcoded watermark notice ─────────────────────────────────────────
         form.addRow(_sep("HARDCODED WATERMARK"))
 
-        hc_frame = QFrame()
-        hc_frame.setStyleSheet(
-            f"QFrame {{ background: {_hex_rgba(C.SURFACE, 0.45)};"
-            f"border: 1px solid {_hex_rgba(C.BORDER, 0.3)};"
-            f"border-radius: 8px; }}"
+        hc_note = QLabel(
+            "Mitten is freemium \u2014 every clip includes a hardcoded \u201cmitten\u201d watermark "
+            "and optional intro animation that cannot be removed. Add your own on top."
         )
-        hc_layout = QVBoxLayout(hc_frame)
-        hc_layout.setContentsMargins(14, 10, 14, 12)
-        hc_layout.setSpacing(4)
-
-        hc_title = QLabel("mitten  \u00b7  always on")
-        hc_title.setStyleSheet(
-            f"color: {_hex_rgba(C.TEXT, 0.45)}; font-size: 11px; font-weight: 700;"
-            f"background: transparent; border: none;"
+        hc_note.setWordWrap(True)
+        hc_note.setStyleSheet(
+            f"color: {C.SUBTEXT}; font-size: 10px; font-style: italic; background: transparent;"
         )
-        hc_layout.addWidget(hc_title)
-
-        hc_desc = QLabel(
-            "Mitten is a freemium tool. Every saved clip includes a hardcoded \u201cmitten\u201d "
-            "watermark and optional intro animation that cannot be removed. "
-            "You can add your own watermark on top."
-        )
-        hc_desc.setWordWrap(True)
-        hc_desc.setStyleSheet(
-            f"color: {_hex_rgba(C.SUBTEXT, 0.6)}; font-size: 10px;"
-            f"background: transparent; border: none;"
-        )
-        hc_layout.addWidget(hc_desc)
-        form.addRow("", hc_frame)
-
-        # ── Preview frame ──────────────────────────────────────────────────────
-        form.addRow(_sep("PREVIEW"))
-
-        self._wm_preview = QFrame()
-        self._wm_preview.setMinimumHeight(110)
-        self._wm_preview.setStyleSheet(
-            f"QFrame {{ background: #111118; border-radius: 8px;"
-            f"border: 1px solid {_hex_rgba(C.BORDER, 0.25)}; }}"
-        )
-        prev_layout = QVBoxLayout(self._wm_preview)
-        prev_layout.setContentsMargins(0, 0, 0, 0)
-
-        self._wm_preview_label = QLabel()
-        self._wm_preview_label.setAlignment(
-            Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight
-        )
-        self._wm_preview_label.setWordWrap(False)
-        self._wm_preview_label.setStyleSheet(
-            "color: rgba(255,255,255,0.6); font-size: 12px;"
-            "background: transparent; border: none; padding: 10px;"
-        )
-        prev_layout.addWidget(self._wm_preview_label, 1)
-        form.addRow("", self._wm_preview)
+        form.addRow("", hc_note)
 
         # ── Your watermark ─────────────────────────────────────────────────────
         form.addRow(_sep("YOUR WATERMARK"))
@@ -1285,6 +1252,7 @@ class SettingsDialog(QWidget):
             "Sans", "Monospace", "Noto Sans", "DejaVu Sans",
             "Liberation Sans", "Ubuntu", "Roboto",
         ])
+        self._wm_fontfamily.currentTextChanged.connect(self._update_wm_preview)
         form.addRow("Font family", self._wm_fontfamily)
 
         self._wm_fontsize = QSpinBox()
@@ -1302,6 +1270,7 @@ class SettingsDialog(QWidget):
                 _fontsize_col.addWidget(_fontsize_hint)
         except Exception:
             pass
+        self._wm_fontsize.valueChanged.connect(self._update_wm_preview)
         form.addRow("Font size", _fontsize_col)
 
         self._wm_fontcolor = QLineEdit("white@0.6")
@@ -1320,6 +1289,7 @@ class SettingsDialog(QWidget):
         fc_col.setSpacing(2)
         fc_col.addWidget(self._wm_fontcolor)
         fc_col.addWidget(fc_hint)
+        self._wm_fontcolor.textChanged.connect(self._update_wm_preview)
         form.addRow("Font color", fc_col)
 
         self._wm_position = QComboBox()
@@ -1343,25 +1313,31 @@ class SettingsDialog(QWidget):
         self._wm_anim_enabled.toggled.connect(self._toggle_anim_fields)
         form.addRow("", self._wm_anim_enabled)
 
-        anim_desc = QLabel(
-            "M fades in \u2192 i\u00b7t\u00b7t\u00b7e\u00b7n pop out forming MITTEN \u2192 "
-            "v0.3 + \u201cClipped by [name] on [OS]\u201d \u2192 fades to watermark. "
-            "Disable to use a static hardcoded watermark only."
+        self._wm_anim_desc = QLabel()
+        self._wm_anim_desc.setWordWrap(True)
+        self._wm_anim_desc.setStyleSheet(
+            f"color: {C.SUBTEXT}; font-size: 10px; font-style: italic; background: transparent;"
         )
-        anim_desc.setWordWrap(True)
-        anim_desc.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px; font-style: italic;")
-        form.addRow("", anim_desc)
+        form.addRow("", self._wm_anim_desc)
 
         self._wm_anim_style = QComboBox()
         self._wm_anim_style.addItems([
             "Snap", "Ripple", "Typewriter", "Broadcast",
             "Shatter", "Glitch", "Rise", "Flashframe",
         ])
+
+        def _on_style_changed(style: str) -> None:
+            self._wm_anim_desc.setText(_ANIM_STYLE_DESCS.get(style, ""))
+
+        self._wm_anim_style.currentTextChanged.connect(_on_style_changed)
+        _on_style_changed(self._wm_anim_style.currentText())
         form.addRow("Animation style", self._wm_anim_style)
 
         self._wm_intro_name = QLineEdit()
         self._wm_intro_name.setPlaceholderText("your name (e.g. mit)")
-        name_hint = QLabel("shown as \u201cClipped by [name] on Linux/Windows\u201d at the end of the intro")
+        name_hint = QLabel(
+            "shown as \u201cClipped by [name] on Linux/Windows\u201d at the end of the intro"
+        )
         name_hint.setWordWrap(True)
         name_hint.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px;")
         name_col = QVBoxLayout()
@@ -1370,12 +1346,76 @@ class SettingsDialog(QWidget):
         name_col.addWidget(name_hint)
         form.addRow("Your name", name_col)
 
+        # ── Preview ────────────────────────────────────────────────────────────
+        prev_hdr = QHBoxLayout()
+        prev_hdr.setSpacing(8)
+        prev_hdr.addWidget(_sep("PREVIEW"), 1)
+        self._wm_preview_anim_btn = QPushButton("\u25b6  Play animation")
+        self._wm_preview_anim_btn.setProperty("class", "secondary")
+        self._wm_preview_anim_btn.setSizePolicy(
+            QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
+        )
+        self._wm_preview_anim_btn.clicked.connect(self._play_wm_anim_preview)
+        prev_hdr.addWidget(self._wm_preview_anim_btn)
+        form.addRow("", prev_hdr)
+
+        self._wm_preview = QFrame()
+        self._wm_preview.setMinimumHeight(200)
+        self._wm_preview.setStyleSheet(
+            f"QFrame {{ background-color: rgba(0,0,0,127); border-radius: 8px;"
+            f"border: 1px solid {_hex_rgba(C.BORDER, 0.25)}; }}"
+        )
+        prev_layout = QVBoxLayout(self._wm_preview)
+        prev_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Hardcoded "mitten" always shows bottom-left
+        self._wm_preview_hc = QLabel("mitten")
+        self._wm_preview_hc.setAlignment(
+            Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignLeft
+        )
+        self._wm_preview_hc.setStyleSheet(
+            "color: rgba(255,255,255,0.4); font-size: 10px;"
+            "background: transparent; border: none; padding: 10px;"
+        )
+
+        self._wm_preview_label = QLabel()
+        self._wm_preview_label.setAlignment(
+            Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight
+        )
+        self._wm_preview_label.setWordWrap(False)
+        self._wm_preview_label.setStyleSheet(
+            "color: rgba(255,255,255,0.6); font-size: 12px;"
+            "background: transparent; border: none; padding: 10px;"
+        )
+
+        # Stack hc bottom-left, user bottom-right inside the preview
+        corner_row = QHBoxLayout()
+        corner_row.setContentsMargins(0, 0, 0, 0)
+        corner_row.setSpacing(0)
+        corner_row.addWidget(self._wm_preview_hc)
+        corner_row.addWidget(self._wm_preview_label, 1)
+
+        # Animation preview label (center, hidden by default)
+        self._wm_anim_preview_lbl = QLabel()
+        self._wm_anim_preview_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._wm_anim_preview_lbl.setStyleSheet(
+            "color: white; font-size: 32px; font-weight: 700;"
+            "background: transparent; border: none;"
+        )
+        self._wm_anim_preview_lbl.hide()
+
+        prev_layout.addWidget(self._wm_anim_preview_lbl, 1)
+        prev_layout.addLayout(corner_row)
+        form.addRow("", self._wm_preview)
+
         self._wm_fields = [
             self._wm_text, self._wm_subtext, self._wm_fontfamily,
             self._wm_fontsize, self._wm_fontcolor, self._wm_position,
             self._wm_padding,
         ]
         self._wm_anim_fields = [self._wm_anim_style, self._wm_intro_name]
+        self._wm_anim_timer: QTimer | None = None
+        self._wm_anim_step = 0
 
         self._update_wm_preview()
         return page
@@ -1387,19 +1427,78 @@ class SettingsDialog(QWidget):
             text    = self._wm_text.text() if enabled else ""
             subtext = self._wm_subtext.text() if enabled else ""
             pos     = self._wm_position.currentText() if enabled else "bottom_right"
+            family  = self._wm_fontfamily.currentText() if enabled else "Sans"
+            size    = max(8, min(self._wm_fontsize.value(), 48)) if enabled else 12
+            # Scale down for preview (preview is ~200px tall vs typical 1080p)
+            preview_size = max(8, size // 2)
 
-            # Always show the hardcoded mitten watermark
-            hc = "mitten"
-            user_part = f"{text}\n{subtext}" if text or subtext else ""
-            combined = f"{hc}\n{user_part}".strip() if user_part else hc
+            # Parse fontcolor "name@opacity" → CSS rgba
+            raw_color = self._wm_fontcolor.text() if enabled else "white@0.6"
+            css_color = "rgba(255,255,255,0.6)"
+            if "@" in raw_color:
+                color_name, _, opacity_str = raw_color.partition("@")
+                try:
+                    opacity = max(0.0, min(float(opacity_str), 1.0))
+                    color_name = color_name.strip().lower()
+                    _named = {
+                        "white": (255, 255, 255), "black": (0, 0, 0),
+                        "yellow": (255, 255, 0), "red": (255, 0, 0),
+                        "green": (0, 255, 0), "blue": (0, 0, 255),
+                        "gray": (128, 128, 128), "grey": (128, 128, 128),
+                    }
+                    r, g, b = _named.get(color_name, (255, 255, 255))
+                    css_color = f"rgba({r},{g},{b},{opacity})"
+                except Exception:
+                    pass
 
-            # Position alignment
+            user_part = "\n".join(p for p in [text, subtext] if p)
             h_align = Qt.AlignmentFlag.AlignRight if "right" in pos else Qt.AlignmentFlag.AlignLeft
             v_align = Qt.AlignmentFlag.AlignBottom if "bottom" in pos else Qt.AlignmentFlag.AlignTop
             self._wm_preview_label.setAlignment(h_align | v_align)
-            self._wm_preview_label.setText(combined)
+            self._wm_preview_label.setText(user_part)
+            self._wm_preview_label.setStyleSheet(
+                f"color: {css_color}; font-size: {preview_size}px; font-family: {family};"
+                f"background: transparent; border: none; padding: 10px;"
+            )
         except Exception:
             pass
+
+    def _play_wm_anim_preview(self) -> None:
+        """Play a simple Qt-driven letter pop-in animation in the preview frame."""
+        letters = list("MITTEN")
+        self._wm_anim_step = 0
+        self._wm_anim_preview_lbl.setText("")
+        self._wm_anim_preview_lbl.show()
+        self._wm_preview_anim_btn.setEnabled(False)
+
+        style = self._wm_anim_style.currentText() if hasattr(self, "_wm_anim_style") else "Snap"
+
+        if self._wm_anim_timer:
+            self._wm_anim_timer.stop()
+
+        # interval between letters depends on style
+        interval = 120 if style == "Typewriter" else 180
+
+        def _tick() -> None:
+            step = self._wm_anim_step
+            if step <= len(letters):
+                shown = "".join(letters[:step])
+                self._wm_anim_preview_lbl.setText(shown or "\u00a0")
+                self._wm_anim_step += 1
+            else:
+                # Hold then fade out
+                self._wm_anim_timer.stop()
+                QTimer.singleShot(800, _finish)
+
+        def _finish() -> None:
+            self._wm_anim_preview_lbl.hide()
+            self._wm_anim_preview_lbl.setText("")
+            self._wm_preview_anim_btn.setEnabled(True)
+
+        self._wm_anim_timer = QTimer(self)
+        self._wm_anim_timer.setInterval(interval)
+        self._wm_anim_timer.timeout.connect(_tick)
+        self._wm_anim_timer.start()
 
     def _make_games_tab(self) -> QWidget:
         page, form = self._page_wrapper()

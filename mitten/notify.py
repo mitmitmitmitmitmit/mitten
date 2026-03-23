@@ -6,6 +6,9 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import threading
+from collections.abc import Callable
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -19,16 +22,7 @@ def notify(
     icon: str = "video-display",
     timeout_ms: int = 5000,
 ) -> None:
-    """
-    Send a desktop notification via notify-send (non-blocking).
-
-    Args:
-        summary:    Notification title.
-        body:       Optional detail text.
-        urgency:    "low", "normal", or "critical".
-        icon:       Icon name (freedesktop icon spec) or file path.
-        timeout_ms: Display duration in milliseconds.
-    """
+    """Send a desktop notification via notify-send (non-blocking)."""
     cmd = [
         "notify-send",
         "-a", _APP_NAME,
@@ -49,3 +43,60 @@ def notify(
         log.debug("notify-send not found, skipping notification: %s — %s", summary, body)
     except Exception as e:
         log.debug("notify-send error: %s", e)
+
+
+def notify_with_actions(
+    summary: str,
+    body: str = "",
+    urgency: str = "normal",
+    icon: str = "video-display",
+    timeout_ms: int = 6000,
+    actions: dict[str, tuple[str, Callable[[], None]]] | None = None,
+) -> None:
+    """
+    Send a desktop notification with optional action buttons.
+
+    actions: {action_id: (label, callback)} — callback is called when the user
+    clicks that action. Runs notify-send --wait in a background thread.
+    Falls back to plain notify() if actions is None or empty.
+    """
+    if not actions:
+        notify(summary, body, urgency, icon, timeout_ms)
+        return
+
+    cmd = [
+        "notify-send",
+        "--wait",
+        "-a", _APP_NAME,
+        "-u", urgency,
+        "-t", str(timeout_ms),
+        "-i", icon,
+    ]
+    for action_id, (label, _) in actions.items():
+        cmd.append(f"--action={action_id}:{label}")
+    cmd.append(summary)
+    if body:
+        cmd.append(body)
+
+    def _run() -> None:
+        try:
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=timeout_ms / 1000 + 60,
+            )
+            action_id = result.stdout.decode().strip()
+            if action_id and action_id in actions:
+                try:
+                    actions[action_id][1]()
+                except Exception as e:
+                    log.debug("notification action callback error: %s", e)
+        except subprocess.TimeoutExpired:
+            pass
+        except FileNotFoundError:
+            log.debug("notify-send not found")
+        except Exception as e:
+            log.debug("notify_with_actions error: %s", e)
+
+    threading.Thread(target=_run, daemon=True).start()
