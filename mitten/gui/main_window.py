@@ -2265,13 +2265,47 @@ class MittenMainWindow(QMainWindow):
                 detail = f"{lm_cat}  why" if dc.show_ascii else "why"
                 data = {"state_override": "light mode loving FREAK", "detail_override": detail, "name_override": "Mitten (L)"}
             else:
-                page = self._pages.currentIndex()
-                state_ov, detail_ov, name_ov = self._gui_presence_strings(page, dc)
+                # Check app triggers first — they override page presence if a matching process is running
+                trig_result = self._check_app_triggers()
+                if trig_result:
+                    state_ov = trig_result
+                    from . import themes as _t2
+                    from .themes import DARK_CAT_IDLE
+                    cat = _t2.get_state_cat(self._state) if dc.animated_ascii and dc.show_ascii else (DARK_CAT_IDLE if dc.show_ascii else "")
+                    detail_ov = f"{cat}  {trig_result}" if cat else trig_result
+                    name_ov = "Mitten Dashboard" if dc.gui_name_override else None
+                else:
+                    page = self._pages.currentIndex()
+                    state_ov, detail_ov, name_ov = self._gui_presence_strings(page, dc)
                 data = {"state_override": state_ov, "detail_override": detail_ov, "name_override": name_ov if dc.show_name else None}
 
             GUI_PRESENCE_FILE.write_text(json.dumps(data))
         except Exception:
             pass
+
+    def _check_app_triggers(self) -> str | None:
+        """Return a custom message if any app trigger's process is currently running, else None."""
+        try:
+            from ..config import load_discord_presence
+            triggers = load_discord_presence().get("app_triggers", [])
+            if not triggers:
+                return None
+            running: set[str] = set()
+            import os
+            for pid in os.listdir("/proc"):
+                if pid.isdigit():
+                    try:
+                        comm = open(f"/proc/{pid}/comm").read().strip().lower()
+                        running.add(comm)
+                    except Exception:
+                        pass
+            for t in triggers:
+                proc = t.get("process", "").lower()
+                if proc and proc in running:
+                    return t.get("message", "")
+        except Exception:
+            pass
+        return None
 
     # Random message pools — (state_line, detail_suffix) per context key
     _PRESENCE_MSGS: dict[str, list[tuple[str, str]]] = {
@@ -2371,6 +2405,15 @@ class MittenMainWindow(QMainWindow):
 
     def _pick_presence_msg(self, key: str) -> tuple[str, str]:
         import random
+        # Check for user custom messages first
+        try:
+            from ..config import load_discord_presence
+            custom = load_discord_presence().get("custom_messages", {}).get(key, [])
+            if custom:
+                msg = random.choice(custom)
+                return msg, msg
+        except Exception:
+            pass
         pool = self._PRESENCE_MSGS.get(key, [("in Mitten", "in Mitten")])
         return random.choice(pool)
 
@@ -2384,10 +2427,14 @@ class MittenMainWindow(QMainWindow):
         def _cat(state: str) -> str:
             return get_state_cat(state) if dc.animated_ascii else DARK_CAT_IDLE
 
+        name_ov = "Mitten Dashboard" if dc.gui_name_override else "mitten"
+
         if page == 0:  # Dashboard
+            if not dc.page_dashboard:
+                return "in Mitten", f"{DARK_CAT_IDLE}  in Mitten", name_ov
             cat = get_state_cat(self._state) if dc.animated_ascii else DARK_CAT_IDLE
             state_txt, detail_txt = self._pick_presence_msg("dashboard")
-            return state_txt, f"{cat}  {detail_txt}", "Mitten Dashboard"
+            return state_txt, f"{cat}  {detail_txt}", name_ov
 
         elif page == 1:  # Clips
             cat_state = self._gui_cat_state
@@ -2405,16 +2452,20 @@ class MittenMainWindow(QMainWindow):
                     clip_suffix = f" · {date_str}" + (f" · {dur_str}" if dur_str else "")
             except Exception:
                 pass
+            if not dc.page_clips:
+                return "in Mitten", f"{DARK_CAT_IDLE}  in Mitten", name_ov
             if cat_state in ("vibe_1", "vibe_2", "vibe_3"):
                 vibe_cat = get_state_cat(cat_state) if dc.animated_ascii else DARK_CAT_VIBE_1
-                return f"watching a clip{clip_suffix}", f"{vibe_cat}  watching a clip{clip_suffix}", "watching a clip with Mitten"
+                return f"watching a clip{clip_suffix}", f"{vibe_cat}  watching a clip{clip_suffix}", name_ov
             elif cat_state == "startled":
-                return f"watching a clip{clip_suffix}", f"{DARK_CAT_STARTLED}  a clip just dropped{clip_suffix}", "watching a clip with Mitten"
+                return f"watching a clip{clip_suffix}", f"{DARK_CAT_STARTLED}  a clip just dropped{clip_suffix}", name_ov
             else:
                 state_txt, detail_txt = self._pick_presence_msg("clips")
-                return state_txt, f"{DARK_CAT_SLEEPY}  {detail_txt}", "Mitten Dashboard"
+                return state_txt, f"{DARK_CAT_SLEEPY}  {detail_txt}", name_ov
 
         elif page == 2:  # Settings
+            if not dc.page_settings:
+                return "in Mitten", f"{DARK_CAT_IDLE}  in Mitten", name_ov
             _section_keys = ["settings_general", "settings_recording", "settings_compression",
                              "settings_watermark", "settings_games", "settings_discord"]
             key = _section_keys[self._gui_settings_idx] if self._gui_settings_idx < len(_section_keys) else "settings_general"
@@ -2422,19 +2473,23 @@ class MittenMainWindow(QMainWindow):
             section = _sections[self._gui_settings_idx] if self._gui_settings_idx < len(_sections) else "settings"
             cat = _cat("settings")
             state_txt, detail_txt = self._pick_presence_msg(key)
-            return f"in settings \u2014 {section}", f"{cat}  {detail_txt}", "Mitten Dashboard"
+            return f"in settings \u2014 {section}", f"{cat}  {detail_txt}", name_ov
 
         elif page == 3:  # About
+            if not dc.page_about:
+                return "in Mitten", f"{DARK_CAT_IDLE}  in Mitten", name_ov
             cat = _cat("about")
             state_txt, detail_txt = self._pick_presence_msg("about")
-            return state_txt, f"{cat}  {detail_txt}", "Mitten Dashboard"
+            return state_txt, f"{cat}  {detail_txt}", name_ov
 
         elif page == 4:  # Debug
+            if not dc.page_debug:
+                return "in Mitten", f"{DARK_CAT_IDLE}  in Mitten", name_ov
             cat = _cat("debug")
             state_txt, detail_txt = self._pick_presence_msg("debug")
-            return state_txt, f"{cat}  {detail_txt}", "Mitten Dashboard"
+            return state_txt, f"{cat}  {detail_txt}", name_ov
 
-        return "in Mitten", f"{DARK_CAT_IDLE}  in Mitten", "Mitten Dashboard"
+        return "in Mitten", f"{DARK_CAT_IDLE}  in Mitten", name_ov
 
     def _show_light_mode_discord_block(self) -> None:
         try:

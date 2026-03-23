@@ -96,6 +96,9 @@ class NotificationsConfig:
     on_error: bool = True
 
 
+DISCORD_PRESENCE_JSON = CONFIG_DIR / "discord_presence.json"
+
+
 @dataclass(frozen=True)
 class DiscordConfig:
     enabled: bool = True
@@ -104,6 +107,16 @@ class DiscordConfig:
     show_game_name: bool = True    # False = "clipping with mitten" instead of actual game name
     show_mode_label: bool = True   # False = activity name is just "mitten"
     show_name: bool = True         # False = no name override (uses app name "MITTEN")
+    # Page presence toggles
+    page_dashboard: bool = True
+    page_clips: bool = True
+    page_settings: bool = True
+    page_about: bool = True
+    page_debug: bool = True
+    # GUI name override — whether opening the GUI sets activity name to "Mitten Dashboard"
+    gui_name_override: bool = True
+    # Stealth — suppress presence while a clip is actively saving
+    stealth_recording: bool = False
 
 
 @dataclass(frozen=True)
@@ -236,6 +249,13 @@ def load_config(config_path: Path | None = None) -> MittenConfig:
             show_game_name=bool(d.get("show_game_name", True)),
             show_mode_label=bool(d.get("show_mode_label", True)),
             show_name=bool(d.get("show_name", True)),
+            page_dashboard=bool(d.get("page_dashboard", True)),
+            page_clips=bool(d.get("page_clips", True)),
+            page_settings=bool(d.get("page_settings", True)),
+            page_about=bool(d.get("page_about", True)),
+            page_debug=bool(d.get("page_debug", True)),
+            gui_name_override=bool(d.get("gui_name_override", True)),
+            stealth_recording=bool(d.get("stealth_recording", False)),
         ),
     )
 
@@ -255,6 +275,26 @@ def create_default_config(dest: Path | None = None) -> Path:
 
 def button_name_to_code(name: str) -> int:
     return BUTTON_NAMES.get(name.upper(), 276)
+
+
+def load_discord_presence() -> dict:
+    """Load custom discord presence config (custom messages + app triggers)."""
+    try:
+        import json
+        if DISCORD_PRESENCE_JSON.exists():
+            return json.loads(DISCORD_PRESENCE_JSON.read_text())
+    except Exception:
+        pass
+    return {"custom_messages": {}, "app_triggers": []}
+
+
+def save_discord_presence(data: dict) -> None:
+    """Save custom discord presence config atomically."""
+    import json
+    DISCORD_PRESENCE_JSON.parent.mkdir(parents=True, exist_ok=True)
+    tmp = DISCORD_PRESENCE_JSON.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    tmp.replace(DISCORD_PRESENCE_JSON)
 
 
 _INLINE_DEFAULT = """\

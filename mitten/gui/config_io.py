@@ -81,6 +81,13 @@ animated_ascii = {_bool(dc.animated_ascii)}
 show_game_name = {_bool(dc.show_game_name)}
 show_mode_label = {_bool(dc.show_mode_label)}
 show_name = {_bool(dc.show_name)}
+page_dashboard = {_bool(dc.page_dashboard)}
+page_clips = {_bool(dc.page_clips)}
+page_settings = {_bool(dc.page_settings)}
+page_about = {_bool(dc.page_about)}
+page_debug = {_bool(dc.page_debug)}
+gui_name_override = {_bool(dc.gui_name_override)}
+stealth_recording = {_bool(dc.stealth_recording)}
 """
 
 

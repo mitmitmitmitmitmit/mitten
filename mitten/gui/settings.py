@@ -1604,6 +1604,10 @@ class SettingsDialog(QWidget):
         return page
 
     def _make_discord_tab(self) -> QWidget:
+        from PyQt6.QtWidgets import (
+            QPlainTextEdit, QListWidget, QListWidgetItem, QHBoxLayout,
+            QPushButton as _PB, QLineEdit, QComboBox as _CB,
+        )
         page, form = self._page_wrapper()
 
         note = QLabel("works with Discord, Vesktop, Flatpak Discord, and arrpc. everyone uses the same app id — no per-user setup.")
@@ -1614,6 +1618,34 @@ class SettingsDialog(QWidget):
         self._dc_enabled = QCheckBox("Enable Discord rich presence")
         form.addRow(self._dc_enabled)
 
+        # ── GUI PRESENCE ──────────────────────────────────────────────────────
+        form.addRow(_sep("GUI PRESENCE"))
+
+        self._dc_gui_name_override = QCheckBox("Show \"Mitten Dashboard\" when GUI is open")
+        self._dc_gui_name_override.setToolTip("When off, the activity name stays as whatever the daemon set it to")
+        form.addRow(self._dc_gui_name_override)
+
+        self._dc_stealth = QCheckBox("Stealth mode while recording  (suppress presence when a clip saves)")
+        form.addRow(self._dc_stealth)
+
+        # ── PAGE VISIBILITY ───────────────────────────────────────────────────
+        form.addRow(_sep("PAGE VISIBILITY"))
+
+        pv_note = QLabel("toggle which pages update the rich presence when you navigate to them")
+        pv_note.setWordWrap(True)
+        pv_note.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px;")
+        form.addRow("", pv_note)
+
+        self._dc_page_dashboard = QCheckBox("Dashboard")
+        self._dc_page_clips     = QCheckBox("Clips")
+        self._dc_page_settings  = QCheckBox("Settings")
+        self._dc_page_about     = QCheckBox("About")
+        self._dc_page_debug     = QCheckBox("Debug")
+        for cb in (self._dc_page_dashboard, self._dc_page_clips,
+                   self._dc_page_settings, self._dc_page_about, self._dc_page_debug):
+            form.addRow(cb)
+
+        # ── ACTIVITY NAME ─────────────────────────────────────────────────────
         form.addRow(_sep("ACTIVITY NAME"))
 
         hint_name = QLabel("controls what shows in the compact friends list view")
@@ -1647,6 +1679,7 @@ class SettingsDialog(QWidget):
         coward_lbl.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px; font-style: italic;")
         form.addRow("", coward_lbl)
 
+        # ── DETAILS ───────────────────────────────────────────────────────────
         form.addRow(_sep("DETAILS"))
 
         self._dc_show_ascii = QCheckBox("Show ASCII cat art in status")
@@ -1660,8 +1693,154 @@ class SettingsDialog(QWidget):
         hint_anim.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px;")
         form.addRow("", hint_anim)
 
+        # ── CUSTOM MESSAGES ───────────────────────────────────────────────────
+        form.addRow(_sep("CUSTOM MESSAGES"))
+
+        msg_note = QLabel("one message per line — mitten picks one at random. leave empty to use the defaults.")
+        msg_note.setWordWrap(True)
+        msg_note.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px;")
+        form.addRow("", msg_note)
+
+        self._dc_msg_page_combo = _CB()
+        self._dc_msg_page_combo.addItems([
+            "dashboard", "clips", "clips_watching", "clips_startled",
+            "settings_general", "settings_recording", "settings_compression",
+            "settings_watermark", "settings_games", "settings_discord",
+            "about", "debug",
+        ])
+        self._dc_msg_page_combo.setStyleSheet(
+            f"QComboBox {{ background: {C.SURFACE}; color: {C.TEXT}; border: 1px solid {C.BORDER};"
+            f" border-radius: 4px; padding: 4px 8px; }}"
+            f"QComboBox QAbstractItemView {{ background: {C.SURFACE}; color: {C.TEXT}; }}"
+        )
+        form.addRow("Page:", self._dc_msg_page_combo)
+
+        self._dc_msg_edit = QPlainTextEdit()
+        self._dc_msg_edit.setMinimumHeight(100)
+        self._dc_msg_edit.setMaximumHeight(150)
+        self._dc_msg_edit.setPlaceholderText("one message per line\nleave empty to use defaults")
+        self._dc_msg_edit.setStyleSheet(
+            f"QPlainTextEdit {{ background: {C.SURFACE}; color: {C.TEXT}; border: 1px solid {C.BORDER};"
+            f" border-radius: 4px; padding: 6px; font-size: 12px; }}"
+        )
+        form.addRow(self._dc_msg_edit)
+
+        # Load/save custom messages from JSON, switching pages preserves edits
+        self._dc_custom_msgs: dict[str, list[str]] = {}
+        try:
+            from ..config import load_discord_presence
+            self._dc_custom_msgs = load_discord_presence().get("custom_messages", {})
+        except Exception:
+            pass
+
+        def _load_msg_page(page_key: str) -> None:
+            msgs = self._dc_custom_msgs.get(page_key, [])
+            self._dc_msg_edit.setPlainText("\n".join(msgs))
+
+        def _save_msg_page() -> None:
+            key = self._dc_msg_page_combo.currentText()
+            lines = [l.strip() for l in self._dc_msg_edit.toPlainText().splitlines() if l.strip()]
+            if lines:
+                self._dc_custom_msgs[key] = lines
+            else:
+                self._dc_custom_msgs.pop(key, None)
+
+        def _on_page_changed(new_key: str) -> None:
+            _save_msg_page()
+            _load_msg_page(new_key)
+
+        self._dc_msg_page_combo.currentTextChanged.connect(_on_page_changed)
+        _load_msg_page(self._dc_msg_page_combo.currentText())
+        self._dc_save_msg_page = _save_msg_page
+        self._dc_custom_msgs_ref = self._dc_custom_msgs  # for _do_save to grab
+
+        # ── APP TRIGGERS ──────────────────────────────────────────────────────
+        form.addRow(_sep("APP TRIGGERS"))
+
+        trig_note = QLabel("show a custom message when a specific process is running. process name = exe name (e.g. chrome, spotify, code).")
+        trig_note.setWordWrap(True)
+        trig_note.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px;")
+        form.addRow("", trig_note)
+
+        self._dc_triggers_list = QListWidget()
+        self._dc_triggers_list.setMaximumHeight(120)
+        self._dc_triggers_list.setStyleSheet(
+            f"QListWidget {{ background: {C.SURFACE}; color: {C.TEXT}; border: 1px solid {C.BORDER};"
+            f" border-radius: 4px; }}"
+            f"QListWidget::item:selected {{ background: {C.OVERLAY}; }}"
+        )
+        form.addRow(self._dc_triggers_list)
+
+        # Add row: process + message inputs
+        add_row = QHBoxLayout()
+        self._dc_trig_proc = QLineEdit()
+        self._dc_trig_proc.setPlaceholderText("process (e.g. chrome)")
+        self._dc_trig_proc.setStyleSheet(
+            f"QLineEdit {{ background: {C.SURFACE}; color: {C.TEXT}; border: 1px solid {C.BORDER};"
+            f" border-radius: 4px; padding: 4px 6px; }}"
+        )
+        self._dc_trig_msg = QLineEdit()
+        self._dc_trig_msg.setPlaceholderText("message (e.g. procrastinating)")
+        self._dc_trig_msg.setStyleSheet(self._dc_trig_proc.styleSheet())
+        btn_add = _PB("Add")
+        btn_add.setFixedWidth(60)
+        btn_add.setStyleSheet(
+            f"QPushButton {{ background: {C.GREEN}; color: {C.BG}; border: none;"
+            f" border-radius: 4px; padding: 4px 10px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: #a6e3a1cc; }}"
+        )
+        btn_rem = _PB("Remove")
+        btn_rem.setFixedWidth(70)
+        btn_rem.setStyleSheet(
+            f"QPushButton {{ background: {C.OVERLAY}; color: {C.TEXT}; border: none;"
+            f" border-radius: 4px; padding: 4px 10px; }}"
+            f"QPushButton:hover {{ background: {C.BORDER}; }}"
+        )
+        add_row.addWidget(self._dc_trig_proc)
+        add_row.addWidget(self._dc_trig_msg)
+        add_row.addWidget(btn_add)
+        add_row.addWidget(btn_rem)
+        form.addRow(add_row)
+
+        # Load existing triggers
+        self._dc_triggers: list[dict] = []
+        try:
+            from ..config import load_discord_presence
+            self._dc_triggers = load_discord_presence().get("app_triggers", [])
+        except Exception:
+            pass
+
+        def _refresh_triggers() -> None:
+            self._dc_triggers_list.clear()
+            for t in self._dc_triggers:
+                self._dc_triggers_list.addItem(f"{t['process']}  →  {t['message']}")
+
+        def _add_trigger() -> None:
+            proc = self._dc_trig_proc.text().strip().lower()
+            msg  = self._dc_trig_msg.text().strip()
+            if not proc or not msg:
+                return
+            self._dc_triggers.append({"process": proc, "message": msg})
+            self._dc_trig_proc.clear()
+            self._dc_trig_msg.clear()
+            _refresh_triggers()
+
+        def _remove_trigger() -> None:
+            row = self._dc_triggers_list.currentRow()
+            if 0 <= row < len(self._dc_triggers):
+                self._dc_triggers.pop(row)
+                _refresh_triggers()
+
+        btn_add.clicked.connect(_add_trigger)
+        btn_rem.clicked.connect(_remove_trigger)
+        _refresh_triggers()
+
+        # ── Wire all preview signals ──────────────────────────────────────────
         for cb in (self._dc_enabled, self._dc_show_game_name, self._dc_show_mode_label,
-                   self._dc_show_name, self._dc_show_ascii, self._dc_animated_ascii):
+                   self._dc_show_name, self._dc_show_ascii, self._dc_animated_ascii,
+                   self._dc_gui_name_override, self._dc_stealth,
+                   self._dc_page_dashboard, self._dc_page_clips, self._dc_page_settings,
+                   self._dc_page_about, self._dc_page_debug):
             cb.stateChanged.connect(self._emit_discord_preview)
 
         return page
@@ -1676,6 +1855,13 @@ class SettingsDialog(QWidget):
                 show_game_name=self._dc_show_game_name.isChecked(),
                 show_mode_label=self._dc_show_mode_label.isChecked(),
                 show_name=self._dc_show_name.isChecked(),
+                gui_name_override=self._dc_gui_name_override.isChecked(),
+                stealth_recording=self._dc_stealth.isChecked(),
+                page_dashboard=self._dc_page_dashboard.isChecked(),
+                page_clips=self._dc_page_clips.isChecked(),
+                page_settings=self._dc_page_settings.isChecked(),
+                page_about=self._dc_page_about.isChecked(),
+                page_debug=self._dc_page_debug.isChecked(),
             )
             self.discord_preview.emit(dc)
         except Exception:
@@ -1885,6 +2071,13 @@ class SettingsDialog(QWidget):
         self._dc_show_game_name.setChecked(d.show_game_name)
         self._dc_show_mode_label.setChecked(d.show_mode_label)
         self._dc_show_name.setChecked(d.show_name)
+        self._dc_gui_name_override.setChecked(d.gui_name_override)
+        self._dc_stealth.setChecked(d.stealth_recording)
+        self._dc_page_dashboard.setChecked(d.page_dashboard)
+        self._dc_page_clips.setChecked(d.page_clips)
+        self._dc_page_settings.setChecked(d.page_settings)
+        self._dc_page_about.setChecked(d.page_about)
+        self._dc_page_debug.setChecked(d.page_debug)
 
         try:
             from .themes import LIGHT_MODE_ACTIVE as _LMA
@@ -2133,11 +2326,40 @@ class SettingsDialog(QWidget):
                 show_game_name=self._dc_show_game_name.isChecked(),
                 show_mode_label=self._dc_show_mode_label.isChecked(),
                 show_name=self._dc_show_name.isChecked(),
+                gui_name_override=self._dc_gui_name_override.isChecked(),
+                stealth_recording=self._dc_stealth.isChecked(),
+                page_dashboard=self._dc_page_dashboard.isChecked(),
+                page_clips=self._dc_page_clips.isChecked(),
+                page_settings=self._dc_page_settings.isChecked(),
+                page_about=self._dc_page_about.isChecked(),
+                page_debug=self._dc_page_debug.isChecked(),
             ),
         )
 
         _validate(cfg)
+
+        # Detect discord config changes before saving (for restart prompt)
+        try:
+            from ..config import load_config as _lc2
+            _prev_dc = _lc2().discord
+            _dc_changed = _prev_dc != cfg.discord
+        except Exception:
+            _dc_changed = False
+
         save_config(cfg)
+
+        # Save custom messages + app triggers to discord_presence.json
+        try:
+            if hasattr(self, "_dc_save_msg_page"):
+                self._dc_save_msg_page()
+            from ..config import save_discord_presence as _sdp
+            _sdp({
+                "custom_messages": getattr(self, "_dc_custom_msgs", {}),
+                "app_triggers": getattr(self, "_dc_triggers", []),
+            })
+        except Exception:
+            pass
+
         self.settings_saved.emit()
 
         if _prev_theme is not None and cfg.general.theme != _prev_theme:
@@ -2173,6 +2395,44 @@ class SettingsDialog(QWidget):
             if dlg.exec() == QDialog.DialogCode.Accepted:
                 self._restart_gui()
                 return
+
+        if _dc_changed:
+            from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+            dlg2 = QDialog(self)
+            dlg2.setWindowTitle("Restart daemon?")
+            dlg2.setFixedWidth(340)
+            lay2 = QVBoxLayout(dlg2)
+            lay2.setContentsMargins(20, 20, 20, 20)
+            lay2.setSpacing(12)
+            lbl2 = QLabel("discord presence changes require a daemon restart to take effect.<br>restart now?")
+            lbl2.setWordWrap(True)
+            lbl2.setStyleSheet(f"color: {C.TEXT}; font-size: 13px;")
+            lay2.addWidget(lbl2)
+            btn_row2 = QHBoxLayout()
+            btn_row2.addStretch()
+            btn_no2 = QPushButton("Later")
+            btn_no2.setStyleSheet(
+                f"QPushButton {{ background: {C.OVERLAY}; color: {C.TEXT}; border: none;"
+                f" border-radius: 6px; padding: 6px 16px; }}"
+                f"QPushButton:hover {{ background: {C.BORDER}; }}"
+            )
+            btn_yes2 = QPushButton("Restart daemon")
+            btn_yes2.setStyleSheet(
+                f"QPushButton {{ background: {C.MAUVE}; color: {C.BG}; border: none;"
+                f" border-radius: 6px; padding: 6px 16px; font-weight: 600; }}"
+                f"QPushButton:hover {{ background: #b490e8; }}"
+            )
+            btn_no2.clicked.connect(dlg2.reject)
+            btn_yes2.clicked.connect(dlg2.accept)
+            btn_row2.addWidget(btn_no2)
+            btn_row2.addWidget(btn_yes2)
+            lay2.addLayout(btn_row2)
+            if dlg2.exec() == QDialog.DialogCode.Accepted:
+                try:
+                    import subprocess as _sp
+                    _sp.Popen(["systemctl", "--user", "restart", "mitten.service"])
+                except Exception:
+                    pass
 
         try:
             from ..daemon_utils import get_daemon_pid, send_reload_signal
