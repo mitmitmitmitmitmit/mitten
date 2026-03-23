@@ -2023,6 +2023,7 @@ class SettingsDialog(QWidget):
                 self._mode_combo.blockSignals(False)
             else:
                 self._confirmed_mode = new_mode
+                self._on_save()
         except Exception:
             pass
 
