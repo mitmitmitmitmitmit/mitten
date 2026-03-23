@@ -468,7 +468,7 @@ class _ClipPreview(QFrame):
             f"color: {C.TEXT}; font-size: 11px;"
             f"padding: 6px 12px;"
             f"background: {_hex_rgba(C.BG, 0.88)};"
-            f"border-radius: 8px;"
+            f"border-radius: 3px;"
             f"border: 1px solid {_hex_rgba(C.BORDER, 0.35)};"
         )
         layout.addWidget(self._name_label)
