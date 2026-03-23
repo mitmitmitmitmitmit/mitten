@@ -96,8 +96,7 @@ systemctl --user status mitten.service
 
 actively used. i clip games with it daily. it hasn't bricked anything recently.
 
-something breaks, open an issue. you fix it, open a pr. there are better odds of me finding love than me actually reviewing it, and given that my type is a femboy twink that perfectly passes as a woman, those odds aren't great. but stranger things have happened.
-
+something breaks, open an issue. you fix it, open a pr. there are better odds of me finding love that isn't a femboy twink than me actually reviewing it, which if you knew me, you'd understand is not a high bar.
 ---
 
 ## coming
