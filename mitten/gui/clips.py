@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSplitter,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -94,8 +95,9 @@ class _TrimWorker(QThread):
 class _PlayerPanel(QWidget):
     """Video player with play/pause, seek, and trim controls."""
 
-    clip_started = pyqtSignal()   # clip begins playing (new load or resume)
-    clip_paused  = pyqtSignal()   # clip paused or unloaded
+    clip_started   = pyqtSignal()   # clip begins playing (new load or resume)
+    clip_paused    = pyqtSignal()   # clip paused or unloaded
+    edit_requested = pyqtSignal()   # user pressed Edit button
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -225,6 +227,14 @@ class _PlayerPanel(QWidget):
         self._btn_open.clicked.connect(self._open_external)
         btn_row.addWidget(self._btn_open)
 
+        self._btn_edit = QPushButton("Edit")
+        self._btn_edit.setProperty("class", "secondary")
+        self._btn_edit.setMinimumWidth(60)
+        self._btn_edit.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_edit.setVisible(False)
+        self._btn_edit.clicked.connect(self.edit_requested.emit)
+        btn_row.addWidget(self._btn_edit)
+
         ctrl_layout.addLayout(btn_row)
 
         # Trim row
@@ -283,6 +293,7 @@ class _PlayerPanel(QWidget):
         self._duration_ms = 0
         self._empty.setVisible(False)
         self._controls.setVisible(True)
+        self._btn_edit.setVisible(True)
         self._trim_start.setValue(0)
         self._trim_end.setValue(1000)
         self._trim_range_lbl.setText("full clip")
@@ -516,6 +527,9 @@ class ClipBrowser(QWidget):
         # Wire player signals after _build_ui creates self._player
         self._player.clip_started.connect(self._on_clip_started)
         self._player.clip_paused.connect(self._on_clip_paused)
+        self._player.edit_requested.connect(self._enter_editor)
+        self._editor.back_requested.connect(self._exit_editor)
+        self._editor.export_done.connect(self._on_export_done)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -589,8 +603,14 @@ class ClipBrowser(QWidget):
         self._splitter.addWidget(self._table)
         self._splitter.setCollapsible(0, False)
 
+        from .editor import _EditorPanel
         self._player = _PlayerPanel()
-        self._splitter.addWidget(self._player)
+        self._editor = _EditorPanel()
+        self._right_stack = QStackedWidget()
+        self._right_stack.addWidget(self._player)
+        self._right_stack.addWidget(self._editor)
+        self._right_stack.setMinimumWidth(400)
+        self._splitter.addWidget(self._right_stack)
         self._splitter.setCollapsible(1, False)
         self._splitter.setSizes([380, 400])
 
@@ -771,6 +791,8 @@ class ClipBrowser(QWidget):
     # ── Interactions ──
 
     def _on_select(self, index) -> None:
+        if self._right_stack.currentIndex() == 1:
+            self._exit_editor()
         row = index.row()
         if 0 <= row < len(self._clip_paths):
             path = self._clip_paths[row]
@@ -837,6 +859,34 @@ class ClipBrowser(QWidget):
                 pass
             self._refresh()
 
+    # ── Editor ──
+
+    def _enter_editor(self) -> None:
+        if not self._player._clip_path:
+            return
+        if getattr(self._player, '_trim_worker', None) and self._player._trim_worker.isRunning():
+            QMessageBox.warning(self, "Trim in progress",
+                                "Please wait for the trim to finish before editing.")
+            return
+        if hasattr(self._player, '_lag_timer'):
+            self._player._lag_timer.stop()
+        self._player._stop_audio()
+        self._player._media_player.pause()
+        dur_ms = int(self._player._media_player.duration()) if self._player._media_player else 0
+        self._editor.load_clip(self._player._clip_path, dur_ms)
+        self._right_stack.setCurrentIndex(1)
+
+    def _exit_editor(self) -> None:
+        self._editor._stop_preview()
+        self._right_stack.setCurrentIndex(0)
+
+    def _on_export_done(self, out_path: object) -> None:
+        if isinstance(out_path, Path):
+            QMessageBox.information(self, "Export complete", f"Saved to:\n{out_path}")
+            self._refresh()
+        else:
+            QMessageBox.critical(self, "Export failed", str(out_path))
+
     # ── Cat vibe system ──
 
     def _emit_cat(self, state: str) -> None:
@@ -890,6 +940,8 @@ class ClipBrowser(QWidget):
     def hideEvent(self, event) -> None:
         super().hideEvent(event)
         self._player._stop_audio()
+        if hasattr(self, '_editor'):
+            self._editor._stop_preview()
         self._vibe_timer.stop()
         self._is_vibing = False
         # Signal idle so sidebar restores to app state
@@ -897,5 +949,7 @@ class ClipBrowser(QWidget):
 
     def closeEvent(self, event) -> None:
         self._player._stop_audio()
+        if hasattr(self, '_editor'):
+            self._editor._stop_preview()
         self._vibe_timer.stop()
         super().closeEvent(event)

@@ -70,6 +70,12 @@ E_GUI_ALREADY_RUNNING   = "M-7002"  # Another GUI instance already running
 E_GUI_SAVE_SETTINGS     = "M-7003"  # Unhandled exception in settings _do_save()
 
 
+# ── Editor (M-8xxx) ──────────────────────────────────────────────────────────
+E_EDITOR_EXPORT_FFMPEG  = "M-8001"  # ffmpeg export command failed
+E_EDITOR_EXPORT_TIMEOUT = "M-8002"  # ffmpeg export timed out
+E_EDITOR_PROBE_FAILED   = "M-8003"  # ffprobe failed to read video info for export
+
+
 def fmt(code: str, msg: str) -> str:
     """Return '[M-XXXX] message' for use in notifications and log lines."""
     return f"[{code}] {msg}"
