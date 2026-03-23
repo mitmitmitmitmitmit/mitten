@@ -2014,9 +2014,9 @@ class MittenMainWindow(QMainWindow):
         self._nav_back = _NavButton("\u2190  Back")
         self._nav_back.setVisible(False)
         self._nav_back.setStyleSheet(
-            f"QPushButton {{ background-color: transparent; color: {C.TEXT};"
+            f"QPushButton {{ background-color: transparent; color: rgba(255,255,255,0.65);"
             f"border: none; text-align: left; padding-left: 20px;"
-            f"font-size: 13px; font-weight: 600; border-radius: 0; }}"
+            f"font-size: 14px; font-weight: 600; border-radius: 0; }}"
             f"QPushButton:hover {{ color: {C.LAVENDER};"
             f"background-color: rgba(255,255,255,0.05); }}"
         )
