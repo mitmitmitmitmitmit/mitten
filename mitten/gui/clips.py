@@ -3,9 +3,10 @@ Clip Browser — split view: table on left, video player + trimmer on right.
 """
 from __future__ import annotations
 
+import json
 import random
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PyQt6.QtCore import QThread, QTimer, Qt, QUrl, pyqtSignal, QObject
@@ -641,14 +642,24 @@ class ClipBrowser(QWidget):
         total_bytes = 0
 
         for i, clip in enumerate(clips):
-            # Name: just time portion, no prefix
-            name_item = QTableWidgetItem(self._clip_display_name(clip))
-            name_item.setToolTip(str(clip))
+            meta = self._load_meta(clip)
+
+            name_item = QTableWidgetItem(self._clip_display_name(clip, meta))
+            tooltip = str(clip)
+            if meta:
+                tooltip = self._meta_tooltip(meta) + f"\n\n{clip}"
+            name_item.setToolTip(tooltip)
             self._table.setItem(i, 0, name_item)
 
-            self._table.setItem(i, 1, QTableWidgetItem(self._parse_date(clip.name)))
+            self._table.setItem(i, 1, QTableWidgetItem(self._parse_date(clip.name, meta)))
 
-            dur_item = QTableWidgetItem("\u2026")
+            # Use sidecar duration if available — skip ffprobe for this row
+            if meta and meta.get("duration_s") is not None:
+                dur_s = int(round(meta["duration_s"]))
+                dur_item = QTableWidgetItem(f"{dur_s}s" if dur_s > 0 else "?")
+            else:
+                dur_item = QTableWidgetItem("\u2026")
+                probe_jobs.append((i, clip))
             dur_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self._table.setItem(i, 2, dur_item)
 
@@ -663,8 +674,6 @@ class ClipBrowser(QWidget):
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
             )
             self._table.setItem(i, 3, size_item)
-
-            probe_jobs.append((i, clip))
 
         self._status.setText(
             f"{len(clips)} clips  \u00b7  {total_bytes / (1024 * 1024):.1f} MB total"
@@ -685,25 +694,74 @@ class ClipBrowser(QWidget):
                 item.setText(f"{seconds}s" if seconds > 0 else "?")
 
     @staticmethod
-    def _clip_display_name(clip: Path) -> str:
-        """Return a human-readable clip name stripped of prefix."""
-        stem = clip.stem.replace("mitten_", "")
+    def _load_meta(path: Path) -> dict | None:
+        try:
+            mp = path.with_suffix(".json")
+            if mp.exists():
+                return json.loads(mp.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _clip_display_name(clip: Path, meta: dict | None = None) -> str:
+        """Return a human-readable clip name, with game prefix if known."""
+        stem = clip.stem.replace("mitten_", "").replace("session_", "")
         try:
             dt = datetime.strptime(stem, "%Y-%m-%d_%H-%M-%S")
-            return dt.strftime("%H:%M:%S")
+            time_str = dt.strftime("%H:%M:%S")
         except ValueError:
-            return stem
+            time_str = stem
+        if meta:
+            game = meta.get("game")
+            if game:
+                return f"{game}  ·  {time_str}"
+            if meta.get("clip_type") == "session":
+                return f"session  ·  {time_str}"
+        return time_str
 
-    def _parse_date(self, filename: str) -> str:
+    @staticmethod
+    def _meta_tooltip(meta: dict) -> str:
+        lines = []
+        if meta.get("game"):
+            lines.append(f"Game: {meta['game']}")
+        ctype = meta.get("clip_type", "clip")
+        mode  = meta.get("mode", "")
+        lines.append(f"Type: {ctype}" + (f"  ·  Mode: {mode}" if mode else ""))
+        wm   = "yes" if meta.get("watermarked") else "no"
+        comp = "yes" if meta.get("compressed") else "no"
+        lines.append(f"Watermarked: {wm}  ·  Compressed: {comp}")
+        if meta.get("codec"):
+            lines.append(f"Codec: {meta['codec']}")
+        lines.append("Saved: " + ("manually" if meta.get("saved_manually") else "auto"))
+        if meta.get("mitten_version"):
+            lines.append(f"Version: {meta['mitten_version']}")
+        return "\n".join(lines)
+
+    def _parse_date(self, filename: str, meta: dict | None = None) -> str:
+        if meta and meta.get("saved_at"):
+            try:
+                dt = datetime.fromisoformat(
+                    meta["saved_at"].replace("Z", "+00:00")
+                ).astimezone()
+                today = datetime.now().date()
+                time_str = dt.strftime("%-I:%M %p")
+                if dt.date() == today:
+                    return f"Today  {time_str}"
+                if (today - dt.date()).days == 1:
+                    return f"Yesterday  {time_str}"
+                return dt.strftime("%b %-d  ") + time_str
+            except Exception:
+                pass
         try:
-            stem = filename.replace("mitten_", "").replace(".mp4", "")
+            stem = filename.replace("mitten_", "").replace("session_", "").replace(".mp4", "")
             dt = datetime.strptime(stem, "%Y-%m-%d_%H-%M-%S")
             today = datetime.now().date()
             time_str = dt.strftime("%-I:%M %p")
             if dt.date() == today:
-                return f"Today {time_str}"
+                return f"Today  {time_str}"
             if (today - dt.date()).days == 1:
-                return f"Yesterday {time_str}"
+                return f"Yesterday  {time_str}"
             return dt.strftime("%b %-d  ") + time_str
         except (ValueError, OSError):
             return "?"
@@ -770,6 +828,9 @@ class ClipBrowser(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 clip.unlink()
+                sidecar = clip.with_suffix(".json")
+                if sidecar.exists():
+                    sidecar.unlink()
             except OSError:
                 pass
             self._refresh()
