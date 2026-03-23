@@ -43,7 +43,7 @@ clips live on your drive. nothing goes anywhere.
 
 ## even being local, we capture all the features from medal
 
-mitten comes built in with discord presnence support (no flatpak, use vesktop)
+mitten comes built in with discord presence support (no flatpak, use vesktop)
 
 mitten comes with animated watermarks, you can edit, a full dashboard with a built in clip viewer, and basic clip editor
 
