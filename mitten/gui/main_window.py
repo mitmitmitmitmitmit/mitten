@@ -465,10 +465,11 @@ class _ClipPreview(QFrame):
         self._name_label = QLabel("no clips yet")
         self._name_label.setWordWrap(False)
         self._name_label.setStyleSheet(
-            f"color: {C.SUBTEXT}; font-size: 11px;"
+            f"color: {C.TEXT}; font-size: 11px;"
             f"padding: 6px 12px;"
-            f"background: {C.SURFACE};"
-            f"border-radius: 0 0 8px 8px;"
+            f"background: {_hex_rgba(C.BG, 0.88)};"
+            f"border-radius: 8px;"
+            f"border: 1px solid {_hex_rgba(C.BORDER, 0.35)};"
         )
         layout.addWidget(self._name_label)
         self._dur_text: str = ""
