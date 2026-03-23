@@ -16,7 +16,7 @@ also medal is windows only, so if you're on linux it literally doesn't exist. th
 
 mitten hits nvenc/vaapi directly. idles under 300mb ram for a 30s 1080p60 buffer. your gpu doesn't notice it's running.
 
-tdlr its shit brah
+tdlr medal is shit brah
 
 ---
 
@@ -28,7 +28,7 @@ tdlr its shit brah
 - **discord compression**: hits the 10mb free limit. two-pass compression locally, your clip never leaves your machine. online tools fumble this. mitten doesn't
 - **vocal trigger** *(coming)*: auto clips laughs, jumpscares, hype moments. no button needed
 - **watermark**: burned in on save. fully customizable. one tiny "mitten" credit stays. it's a solo project, that's literally all it asks. fork it if you want, i'm not your dad
-- **auto-update**: checks for updates on startup, backs up first, rolls back if something breaks
+- **auto update**: checks for updates on startup, backs up first, rolls back if something breaks
 - **gui**: tray app. clip browser, trim, settings, stats. not electron. i said what i said
 
 ---
