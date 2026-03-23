@@ -10,11 +10,11 @@ keeps a rolling replay buffer on your gpu. press a button, the last N seconds ar
 
 ## why
 
-medal is windows-only. idles at 20%+ gpu on a 3090. defaults to cpu encoding. uploads your clips publicly by default. adds itself to startup without asking. one guy called it malware because it reinstalled itself after uninstall. there's a black screen recording bug that's been open for years. they know.
+medal idles at 20%+ gpu on a 3090. uploads your clips publicly by default. adds itself to startup without asking. one guy called it malware because it reinstalled itself after uninstall. there's a black screen recording bug that's been open for years. they know. they don't care.
 
-mitten uses `gpu-screen-recorder` which hits nvenc/vaapi directly. idles under 300mb ram for a 30s 1080p60 buffer. your gpu doesn't notice it's running.
+also medal is windows-only, so if you're on linux it literally doesn't exist. this does. you're welcome.
 
-also if you're on linux, medal doesn't exist. this does.
+mitten hits nvenc/vaapi directly. idles under 300mb ram for a 30s 1080p60 buffer. your gpu doesn't notice it's running.
 
 ---
 
@@ -23,31 +23,27 @@ also if you're on linux, medal doesn't exist. this does.
 - **replay buffer**: last N seconds, always rolling. press the button, it saves. you know how this works
 - **game detection**: sees a game launch, starts capture, stops when you close it
 - **session recording**: triple-click to start, triple-click to stop and save. same button, different gesture
-- **discord compression**: hits the 10mb free limit. two-pass ffmpeg locally, 90+ vmaf at sizes where online tools just give up. your clip never leaves your machine
+- **discord compression**: hits the 10mb free limit. two-pass compression locally, your clip never leaves your machine. online tools fumble this. mitten doesn't
 - **vocal trigger** *(coming)*: auto-clips laughs, jumpscares, hype moments. no button needed
-- **watermark**: burned in on save. fully customizable (text, size, position, opacity). one tiny "mitten" credit stays. it's a solo project, that's all it asks. MIT license, fork if you want
-- **auto-update**: checks github on startup, backs up first, rolls back if something breaks
-- **native gui**: PyQt6 tray app. clip browser, trim, settings, stats. not electron
+- **watermark**: burned in on save. fully customizable. one tiny "mitten" credit stays. it's a solo project, that's literally all it asks. fork it if you want, i'm not your dad
+- **auto-update**: checks for updates on startup, backs up first, rolls back if something breaks
+- **gui**: tray app. clip browser, trim, settings, stats. not electron. i said what i said
 
 ---
 
 ## actually local
 
-zero telemetry. no account. no uploads. no "share with the community" checkbox that's pre-ticked.
+zero telemetry. no account. no uploads. no "share with the community" checkbox that's pre-ticked and buried in settings.
 
-the only server mitten has ever touched is github, and only to check for updates. that can be turned off too.
-
-clips live on your drive. compression runs on your machine. nothing goes anywhere.
+clips live on your drive. nothing goes anywhere.
 
 ---
 
 ## how it's built
 
-i'm an avid stimulant abuser who games daily and breaks his own software doing it. features get stress tested until something snaps, then fixed, then stress tested again.
+i'm an avid stimulant abuser who games daily and breaks his own software doing it. i've bricked my os 5 times messing around with shit i shouldn't. if that doesn't make you trust this software i cooked up in a week or two with my homeboy claude, i don't know what will.
 
-i also build a lot of this with claude actively in the codebase. i give him bad instructions on purpose sometimes just to see what he does. he usually figures it out. occasionally he does not. the commits speak for themselves.
-
-every line gets read and tested on real hardware before it ships.
+i also give claude bad instructions on purpose sometimes just to see what he does. he usually figures it out. occasionally he does not. the commits speak for themselves.
 
 ---
 
@@ -55,11 +51,7 @@ every line gets read and tested on real hardware before it ships.
 
 **OS:** arch-based (arch, cachyos, manjaro, endeavouros). wayland only.
 
-| binary | package |
-|--------|---------|
-| `gpu-screen-recorder` | `yay -S gpu-screen-recorder` |
-| `ffmpeg` / `ffplay` | `sudo pacman -S ffmpeg` |
-| `notify-send` | `sudo pacman -S libnotify` |
+you need `gpu-screen-recorder`, `ffmpeg`, and `notify-send`. the setup wizard installs everything, don't worry about it.
 
 python 3.11+
 
@@ -73,25 +65,25 @@ pip install -e . --break-system-packages
 mitten
 ```
 
-`--break-system-packages` is required on arch. it's fine, mitten's deps don't conflict with system packages.
+`--break-system-packages` is required on arch. i know how it looks. it's fine.
 
-if `mitten` isn't in your path after install, your shell doesn't know about `~/.local/bin`. fix it:
+if `mitten` isn't found after install, your shell doesn't know about `~/.local/bin`:
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
 # zsh:
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 ```
 
-first run launches the setup wizard: installs missing deps, adds you to the `input` group, writes a default config, sets up the systemd service. you don't need to open a terminal again after that.
+first run launches the setup wizard and handles everything. you don't need a terminal again after that. probably.
 
 ---
 
 ## usage
 ```bash
-mitten    # opens gui, runs setup wizard on first launch
+mitten
 ```
 
-the daemon runs as a systemd user service. the gui handles start/stop. if you need to poke it directly:
+that's it. the gui handles everything else. if you need to poke the daemon directly:
 ```bash
 systemctl --user start mitten.service
 systemctl --user stop mitten.service
@@ -102,9 +94,9 @@ systemctl --user status mitten.service
 
 ## status
 
-actively used. i clip games with it daily.
+actively used. i clip games with it daily. it hasn't bricked anything recently.
 
-something breaks, open an issue. you fix it, open a pr.
+something breaks, open an issue. you fix it, open a pr. there are better odds of me finding love than me actually reviewing it, and given that my type is a femboy twink that perfectly passes as a woman, those odds aren't great. but stranger things have happened.
 
 ---
 
@@ -112,11 +104,11 @@ something breaks, open an issue. you fix it, open a pr.
 
 - vocal trigger: auto-clips laughs, screams, hype moments without pressing anything
 - discord rich presence + direct clip posting
-- windows port
-- mitten.clips. soon.
+- windows port (i know, i know)
+- mitten.clips. soon. i mean it this time.
 
 ---
 
 ## license
 
-MIT. see LICENSE.
+MIT. do whatever you want with it, just don't make it worse.
