@@ -113,6 +113,20 @@ def _show_crash_dialog(exc_type: type, exc_value: BaseException, tb_text: str) -
         report_lbl.setStyleSheet("color: #a6adc8; font-size: 11px;")
         layout.addWidget(report_lbl)
 
+        restart_lbl = QLabel(
+            "If you cannot access the GUI, run "
+            "<span style='font-family:monospace; color:#a6e3a1;'>mitten restart</span>"
+            " in your terminal to reinstall and restart Mitten. "
+            "If this crash is caused by a recent update, wait for a fix to be released, "
+            "then run that command."
+        )
+        restart_lbl.setWordWrap(True)
+        restart_lbl.setStyleSheet(
+            "color: #6c7086; font-size: 10px; font-style: italic;"
+            "background: #181825; border-radius: 5px; padding: 8px 10px;"
+        )
+        layout.addWidget(restart_lbl)
+
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
