@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
-
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
