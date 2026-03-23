@@ -25,7 +25,7 @@ tdlr medal is shit brah
 - **replay buffer**: last N seconds, always rolling. press the button, it saves. you know how this works
 - **game detection**: sees a game launch, starts capture, stops when you close it
 - **session recording**: triple click to start, triple click to stop and save. same button, different gesture
-- **discord compression**: hits the 10mb free limit. two-pass compression locally, your clip never leaves your machine. online tools fumble this. mitten doesn't
+- **discord compression**: hits the 10mb free limit. compression done locally, your clip never leaves your machine. online tools fumble this. mitten doesn't
 - **vocal trigger** *(coming)*: auto clips laughs, jumpscares, hype moments. no button needed
 - **watermark**: burned in on save. fully customizable. one tiny "mitten" credit stays. it's a solo project, that's literally all it asks. fork it if you want, i'm not your dad
 - **auto update**: checks for updates on startup, backs up first, rolls back if something breaks
