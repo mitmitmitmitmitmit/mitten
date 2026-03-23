@@ -1271,47 +1271,37 @@ class SettingsDialog(QWidget):
         self._wm_padding.setValue(20)
         form.addRow("Padding", self._wm_padding)
 
-        anim_sep_row = QHBoxLayout()
-        anim_sep_row.setSpacing(8)
-        anim_sep_row.addWidget(_sep("ANIMATION"))
-        anim_coming = QLabel("(coming soon)")
-        anim_coming.setStyleSheet(
-            f"color: {C.SUBTEXT}; font-size: 10px; opacity: 0.6; padding-top: 10px;"
+        form.addRow(_sep("ANIMATION"))
+
+        anim_desc = QLabel(
+            "Every saved clip starts with a Mitten intro: "
+            "M fades in → letters pop out forming MITTEN → v0.3 fades in below → "
+            "fades out → your watermark appears → "
+            "\u201cClipped by [name] on [OS]\u201d fades in."
         )
-        anim_sep_row.addWidget(anim_coming)
-        anim_sep_row.addStretch()
-        form.addRow(anim_sep_row)
+        anim_desc.setWordWrap(True)
+        anim_desc.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px; font-style: italic;")
+        form.addRow("", anim_desc)
 
-        self._wm_anim_preset = QComboBox()
-        self._wm_anim_preset.addItems(["None", "Slide In", "Fade", "Bounce", "Pop"])
-        self._wm_anim_preset.setEnabled(False)
-        form.addRow("Animation", self._wm_anim_preset)
+        self._wm_anim_style = QComboBox()
+        self._wm_anim_style.addItems(["Classic", "Typewriter", "Scatter", "Glitch"])
+        form.addRow("Animation style", self._wm_anim_style)
 
-        self._wm_paw_intro = QCheckBox("Show animated paw intro")
-        self._wm_paw_intro.setChecked(True)
-        self._wm_paw_intro.setEnabled(False)
-        form.addRow("", self._wm_paw_intro)
-
-        icon_row = QHBoxLayout()
-        self._wm_icon_path = QLineEdit()
-        self._wm_icon_path.setPlaceholderText("(default paw icon)")
-        self._wm_icon_path.setEnabled(False)
-        self._wm_icon_browse = QPushButton()
-        self._wm_icon_browse.setIcon(QIcon.fromTheme("document-open", QIcon.fromTheme("folder")))
-        self._wm_icon_browse.setToolTip("Browse for custom icon image")
-        self._wm_icon_browse.setProperty("class", "secondary")
-        self._wm_icon_browse.setFixedWidth(36)
-        self._wm_icon_browse.clicked.connect(self._browse_icon)
-        self._wm_icon_browse.setEnabled(False)
-        icon_row.addWidget(self._wm_icon_path, 1)
-        icon_row.addWidget(self._wm_icon_browse)
-        form.addRow("Custom icon", icon_row)
+        self._wm_intro_name = QLineEdit()
+        self._wm_intro_name.setPlaceholderText("your name (e.g. mit)")
+        name_hint = QLabel("shown as \u201cClipped by [name] on Linux/Windows\u201d at the end of the intro")
+        name_hint.setWordWrap(True)
+        name_hint.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px;")
+        name_col = QVBoxLayout()
+        name_col.setSpacing(2)
+        name_col.addWidget(self._wm_intro_name)
+        name_col.addWidget(name_hint)
+        form.addRow("Your name", name_col)
 
         self._wm_fields = [
             self._wm_text, self._wm_subtext, self._wm_fontfamily,
             self._wm_fontsize, self._wm_fontcolor, self._wm_position,
-            self._wm_padding, self._wm_anim_preset, self._wm_paw_intro,
-            self._wm_icon_path, self._wm_icon_browse,
+            self._wm_padding, self._wm_anim_style, self._wm_intro_name,
         ]
 
         return page
@@ -1568,13 +1558,6 @@ class SettingsDialog(QWidget):
                 path.replace(home, "~") if path.startswith(home) else path
             )
 
-    def _browse_icon(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Choose icon image", "", "Images (*.png *.jpg *.svg)"
-        )
-        if path:
-            self._wm_icon_path.setText(path)
-
     def _add_process(self) -> None:
         text = self._proc_input.text().strip()
         if text:
@@ -1675,6 +1658,7 @@ class SettingsDialog(QWidget):
         self._wm_fontcolor.setText(wm.fontcolor)
         self._wm_position.setCurrentText(wm.position)
         self._wm_padding.setValue(wm.padding)
+        self._wm_intro_name.setText(wm.intro_name)
         self._toggle_watermark_fields(wm.enabled)
 
         gd = cfg.game_detection
@@ -1923,6 +1907,7 @@ class SettingsDialog(QWidget):
                 fontcolor=self._wm_fontcolor.text(),
                 position=self._wm_position.currentText(),
                 padding=self._wm_padding.value(),
+                intro_name=self._wm_intro_name.text().strip(),
             ),
             game_detection=GameDetectionConfig(
                 enabled=True,

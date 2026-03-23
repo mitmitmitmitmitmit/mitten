@@ -74,6 +74,7 @@ class WatermarkConfig:
     fontcolor: str = "white@0.6"
     position: str = "bottom_right"
     padding: int = 20
+    intro_name: str = ""  # shown as "Clipped by [name] on [OS]" in the intro animation
 
 
 @dataclass(frozen=True)
@@ -209,6 +210,7 @@ def load_config(config_path: Path | None = None) -> MittenConfig:
             fontcolor=str(wm.get("fontcolor", "white@0.6")),
             position=str(wm.get("position", "bottom_right")),
             padding=int(wm.get("padding", 20)),
+            intro_name=str(wm.get("intro_name", "")),
         ),
         game_detection=GameDetectionConfig(
             enabled=bool(gd.get("enabled", True)),
