@@ -2386,7 +2386,7 @@ class MittenMainWindow(QMainWindow):
         if page == 0:  # Dashboard
             cat = get_state_cat(self._state) if dc.animated_ascii else DARK_CAT_IDLE
             state_txt, detail_txt = self._pick_presence_msg("dashboard")
-            return state_txt, f"{cat}  {detail_txt}", "customizing Mitten"
+            return state_txt, f"{cat}  {detail_txt}", "mitten dashboard"
 
         elif page == 1:  # Clips
             cat_state = self._gui_cat_state
@@ -2411,7 +2411,7 @@ class MittenMainWindow(QMainWindow):
                 return f"watching a clip{clip_suffix}", f"{DARK_CAT_STARTLED}  a clip just dropped{clip_suffix}", "watching a clip with Mitten"
             else:
                 state_txt, detail_txt = self._pick_presence_msg("clips")
-                return state_txt, f"{DARK_CAT_SLEEPY}  {detail_txt}", "customizing Mitten"
+                return state_txt, f"{DARK_CAT_SLEEPY}  {detail_txt}", "mitten dashboard"
 
         elif page == 2:  # Settings
             _section_keys = ["settings_general", "settings_recording", "settings_compression",
@@ -2421,19 +2421,19 @@ class MittenMainWindow(QMainWindow):
             section = _sections[self._gui_settings_idx] if self._gui_settings_idx < len(_sections) else "settings"
             cat = _cat("settings")
             state_txt, detail_txt = self._pick_presence_msg(key)
-            return f"in settings \u2014 {section}", f"{cat}  {detail_txt}", "customizing Mitten"
+            return f"in settings \u2014 {section}", f"{cat}  {detail_txt}", "mitten dashboard"
 
         elif page == 3:  # About
             cat = _cat("about")
             state_txt, detail_txt = self._pick_presence_msg("about")
-            return state_txt, f"{cat}  {detail_txt}", "customizing Mitten"
+            return state_txt, f"{cat}  {detail_txt}", "mitten dashboard"
 
         elif page == 4:  # Debug
             cat = _cat("debug")
             state_txt, detail_txt = self._pick_presence_msg("debug")
-            return state_txt, f"{cat}  {detail_txt}", "customizing Mitten"
+            return state_txt, f"{cat}  {detail_txt}", "mitten dashboard"
 
-        return "in Mitten", f"{DARK_CAT_IDLE}  in Mitten", "customizing Mitten"
+        return "in Mitten", f"{DARK_CAT_IDLE}  in Mitten", "mitten dashboard"
 
     def _show_light_mode_discord_block(self) -> None:
         try:
