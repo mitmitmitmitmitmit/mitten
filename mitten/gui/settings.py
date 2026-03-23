@@ -1858,6 +1858,7 @@ class SettingsDialog(QWidget):
         self._wm_padding.setValue(wm.padding)
         self._wm_intro_name.setText(wm.intro_name)
         self._wm_anim_enabled.setChecked(wm.anim_enabled)
+        self._wm_anim_style.setCurrentText(getattr(wm, "anim_style", "Snap"))
         self._toggle_watermark_fields(wm.enabled)
         self._toggle_anim_fields(wm.anim_enabled)
 
@@ -2109,6 +2110,7 @@ class SettingsDialog(QWidget):
                 padding=self._wm_padding.value(),
                 intro_name=self._wm_intro_name.text().strip(),
                 anim_enabled=self._wm_anim_enabled.isChecked(),
+                anim_style=self._wm_anim_style.currentText(),
             ),
             game_detection=GameDetectionConfig(
                 enabled=True,
