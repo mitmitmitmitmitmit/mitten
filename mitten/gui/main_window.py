@@ -2461,6 +2461,8 @@ class MittenMainWindow(QMainWindow):
             try:
                 from . import themes as _t
                 if _t.LIGHT_MODE_ACTIVE:
+                    for i, btn in enumerate(self._settings_nav_buttons):
+                        btn.setChecked(i == self._gui_settings_idx)
                     self._show_light_mode_discord_block()
                     return
             except Exception:
