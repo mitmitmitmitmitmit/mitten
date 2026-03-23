@@ -929,10 +929,10 @@ class _ReviewSlider(QFrame):
         bl.setSpacing(6)
         q_lbl = QLabel(quote)
         q_lbl.setWordWrap(True)
-        q_lbl.setStyleSheet(f"color: {C.TEXT}; font-size: 12px; background: transparent;")
+        q_lbl.setStyleSheet(f"color: {C.TEXT}; font-size: 12px; background: transparent; border: none;")
         bl.addWidget(q_lbl)
         src_lbl = QLabel(f"\u2014 {source}")
-        src_lbl.setStyleSheet(f"color: {C.GRAY}; font-size: 10px; background: transparent;")
+        src_lbl.setStyleSheet(f"color: {C.GRAY}; font-size: 10px; background: transparent; border: none;")
         bl.addWidget(src_lbl)
         wl.addWidget(block)
 
