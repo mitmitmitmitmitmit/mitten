@@ -41,6 +41,19 @@ clips live on your drive. nothing goes anywhere.
 
 ---
 
+## even being local, we capture all the features from medal
+
+mitten comes built in with discord presnence support (no flatpak, use vesktop)
+
+mitten comes with animated watermarks, you can edit, a full dashboard with a built in clip viewer, and basic clip editor
+
+a full settings menu where you can tweak everything to your liking with no paywall for certain settings (tsk tsk tsk)
+
+its beautiful really..
+
+
+---
+
 ## how it's built
 
 i'm an avid stimulant abuser who games daily and breaks his own software doing it. i've bricked my os 5 times messing around with shit i shouldn't. if that doesn't make you trust this software i cooked up in a week or two with my homebot claude, i don't know what will.
