@@ -38,5 +38,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/mitten.exe
+          tag_name: v0.3.7-windows
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
