@@ -213,7 +213,7 @@ def get_page_cat(page_idx: int, app_state: str = "idle") -> str:
 
 
 def play_dark_meow() -> None:
-    return #idk why claude added this lul - mit
+    return #idk why claude added this lul kept hearing a fucking meow in the background - mit
     """Play the happy stage 0 meow (dark mode idle/wink sound)."""
     import subprocess
     from pathlib import Path

@@ -129,7 +129,7 @@ def run_app(abuse_reveal: bool = False) -> None:
         QTimer.singleShot(800, lambda: QMessageBox.information(
             window,
             "theme changed",
-            "fuck you buddy. i really hate people who use light mode.",
+            "fuck you buddy. i really hate people who use light mode.", # can confirm - mit
         ))
 
     # Create tray icon (for minimize-to-tray + quick actions)
