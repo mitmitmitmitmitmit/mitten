@@ -13,7 +13,8 @@ import logging
 import sys
 from pathlib import Path
 
-_LOG_DIR = Path.home() / ".local" / "share" / "mitten" / "logs"
+from .config import DATA_DIR as _DATA_DIR
+_LOG_DIR = _DATA_DIR / "logs"
 _FMT = "%(asctime)s  %(levelname)-7s  %(name)s  %(message)s"
 _DATEFMT = "%H:%M:%S"
 
