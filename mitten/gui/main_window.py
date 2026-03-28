@@ -536,7 +536,16 @@ class _ClipPreview(QFrame):
         super().leaveEvent(event)
 
     def set_clip(self, path: Path | None) -> None:
-        if path == self._clip_path:
+        if path == self._clip_path and path is not None:
+            # Same path — only retry if the player silently failed to load
+            if self._media_player:
+                try:
+                    from PyQt6.QtMultimedia import QMediaPlayer as _MP
+                    if self._media_player.playbackState() != _MP.PlaybackState.PlayingState:
+                        self._media_player.setSource(QUrl.fromLocalFile(str(path)))
+                        self._media_player.play()
+                except Exception:
+                    pass
             return
         self._audio_stop_timer.stop()
         self._stop_audio()
