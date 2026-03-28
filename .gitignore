@@ -29,6 +29,10 @@ env/
 .claude/
 CLAUDE.md
 
+# Markdown docs (keep README only)
+*.md
+!README.md
+
 # OS
 .DS_Store
 Thumbs.db
