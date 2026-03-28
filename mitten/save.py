@@ -132,56 +132,39 @@ def _do_process(
     target_mb = config.recorder.compression_target_mb
     light_mode = _is_light_mode(config)
 
-    # ── Intro animation path (always takes priority when enabled) ────────────
-    if wm.anim_enabled:
-        log.info("Encoding clip with intro animation (%s): %s (%ds)",
-                 getattr(wm, "anim_style", "Snap"), filename, actual_seconds)
-        target = target_mb if auto_compress and actual_seconds > 0 else None
-        success = _encode_with_intro(raw_path, output_path, wm, target,
-                                     actual_seconds, light_mode=light_mode)
-        if not success:
-            output_path.unlink(missing_ok=True)
-            if on_failure:
-                on_failure(_efmt(E_SAVE_FFMPEG_ENCODE, "Intro encode failed — check logs"))
-            return
-        raw_path.unlink(missing_ok=True)
-        if auto_compress and target_mb is not None:
-            post_mb = output_path.stat().st_size / (1024 * 1024)
-            if post_mb > target_mb:
-                _notify.notify(
-                    "~( ^.x.^)>  Mitten",
-                    f"clip saved but still {post_mb:.1f}MB (target was {target_mb}MB)",
-                    urgency="normal", icon="dialog-information", timeout_ms=5000,
-                )
-        log.info("Clip saved (intro): %s", output_path.name)
-        _record_metric(start_time, output_path, auto_compress and actual_seconds > 0, None)
-        _write_meta(output_path, meta, actual_seconds, config,
-                    watermarked=wm.enabled, compressed=auto_compress and actual_seconds > 0)
-        if on_success:
-            on_success(output_path, actual_seconds)
-        return
-
-    # ── No watermark path ────────────────────────────────────────────
+    # ── No user watermark — still burn mitten mark ───────────────────
     if not wm.enabled:
         if auto_compress and actual_seconds > 0:
-            log.info("Encoding clip (no watermark, targeted): %s (%ds)", filename, actual_seconds)
+            log.info("Encoding clip (mitten mark only, targeted): %s (%ds)", filename, actual_seconds)
             success = _encode_targeted(raw_path, output_path, None, target_mb, actual_seconds, light_mode=light_mode)
         else:
+            log.info("Encoding clip (mitten mark only): %s (%ds)", filename, actual_seconds)
+            cmd = _build_mitten_mark_cmd(raw_path, output_path, light_mode=light_mode)
             try:
-                shutil.move(str(raw_path), str(output_path))
-                success = True
-            except OSError as e:
-                success = False
-                msg = _efmt(E_SAVE_MOVE, f"Failed to move clip: {e}")
-                log.error(msg)
-                if on_failure:
-                    on_failure(msg)
-                return
+                result = subprocess.run(cmd, capture_output=True, timeout=120)
+                success = result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0
+                if not success:
+                    log.warning("mitten mark encode failed, falling back to copy")
+                    shutil.move(str(raw_path), str(output_path))
+                    success = True
+                else:
+                    raw_path.unlink(missing_ok=True)
+            except (subprocess.TimeoutExpired, OSError) as e:
+                log.warning("mitten mark encode error: %s — falling back to copy", e)
+                try:
+                    shutil.move(str(raw_path), str(output_path))
+                    success = True
+                except OSError as e2:
+                    msg = _efmt(E_SAVE_MOVE, f"Failed to move clip: {e2}")
+                    log.error(msg)
+                    if on_failure:
+                        on_failure(msg)
+                    return
 
         if success:
-            log.info("Clip saved (no watermark): %s", filename)
-            _record_metric(start_time, output_path, auto_compress, raw_path)
-            _write_meta(output_path, meta, actual_seconds, config, watermarked=False, compressed=auto_compress)
+            log.info("Clip saved (no user watermark): %s", filename)
+            _record_metric(start_time, output_path, auto_compress and actual_seconds > 0, raw_path if raw_path.exists() else None)
+            _write_meta(output_path, meta, actual_seconds, config, watermarked=False, compressed=auto_compress and actual_seconds > 0)
             if on_success:
                 on_success(output_path, actual_seconds)
         else:
@@ -356,6 +339,7 @@ def _encode_targeted(
         vf_parts.append(_drawtext_filter(
             wm.text, wm.subtext, wm.fontsize, wm.fontcolor, wm.position, wm.padding
         ))
+    vf_parts.append(_mitten_mark_filter())
     if light_mode:
         vf_parts.append(_light_mode_shame_filter())
     vf_parts.append("hqdn3d=1.5:1.5:6:6")
@@ -477,6 +461,7 @@ def _build_watermark_cmd(
     light_mode: bool = False,
 ) -> list[str]:
     vf = _drawtext_filter(wm.text, wm.subtext, wm.fontsize, wm.fontcolor, wm.position, wm.padding)
+    vf = vf + "," + _mitten_mark_filter()
     if light_mode:
         vf = vf + "," + _light_mode_shame_filter()
 
@@ -566,6 +551,45 @@ def _light_mode_shame_filter() -> str:
     )
 
 
+def _mitten_mark_filter() -> str:
+    """Hardcoded mitten v{ver} watermark — always burned into every clip, bottom-left."""
+    try:
+        from importlib.metadata import version as _pv
+        ver = _pv("mitten")
+    except Exception:
+        ver = ""
+    text = f"mitten v{ver}" if ver else "mitten"
+    safe = text.replace("'", "\\'").replace(":", "\\:")
+    return (
+        f"drawtext=text='{safe}'"
+        f":fontsize=12:fontcolor=white@0.4"
+        f":x=8:y=H-th-8"
+        f":shadowcolor=black@0.5:shadowx=1:shadowy=1"
+    )
+
+
+def _build_mitten_mark_cmd(
+    input_path: Path,
+    output_path: Path,
+    light_mode: bool = False,
+) -> list[str]:
+    """Minimal CQ encode that burns only the hardcoded mitten mark (no user watermark)."""
+    vf_parts = [_mitten_mark_filter()]
+    if light_mode:
+        vf_parts.append(_light_mode_shame_filter())
+    vf = ",".join(vf_parts)
+    return [
+        "ffmpeg", "-y",
+        "-i", str(input_path),
+        "-vf", vf,
+        "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "26",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        str(output_path),
+    ]
+
+
 def _is_light_mode(config) -> bool:
     """Check if the saved theme is Light."""
     try:
@@ -589,134 +613,6 @@ def _probe_duration(path: Path) -> int:
         return max(0, int(float(result.stdout.strip())))
     except Exception:
         return 0
-
-
-def _probe_video_info(path: Path) -> tuple[int, int, str, bool]:
-    """Return (width, height, fps_str, has_audio) via ffprobe. Returns (0,0,'30',False) on failure."""
-    import json as _json
-    try:
-        result = subprocess.run(
-            [
-                "ffprobe", "-v", "error",
-                "-show_streams",
-                "-print_format", "json",
-                str(path),
-            ],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode != 0:
-            return 0, 0, "30", False
-        data = _json.loads(result.stdout)
-        streams = data.get("streams", [])
-        width = height = 0
-        fps = "30"
-        has_audio = False
-        for s in streams:
-            if s.get("codec_type") == "video" and width == 0:
-                width  = int(s.get("width",  0))
-                height = int(s.get("height", 0))
-                r_fr   = s.get("r_frame_rate", "30/1")
-                if "/" in r_fr:
-                    num, den = r_fr.split("/", 1)
-                    if int(den) > 0:
-                        fps = r_fr
-            elif s.get("codec_type") == "audio":
-                has_audio = True
-        return width, height, fps, has_audio
-    except Exception as e:
-        log.debug("_probe_video_info failed: %s", e)
-        return 0, 0, "30", False
-
-
-def _encode_with_intro(
-    input_path: Path,
-    output_path: Path,
-    wm,
-    target_mb: int | None,
-    duration_sec: int,
-    light_mode: bool = False,
-) -> bool:
-    """
-    Encode the clip with a prepended MITTEN intro animation via filter_complex.
-    target_mb=None → CQ encode (no bitrate targeting).
-    Falls back to libx264 if NVENC fails.
-    """
-    from .intro import build_intro_filter_complex, INTRO_DUR
-
-    width, height, fps, has_audio = _probe_video_info(input_path)
-    if width == 0 or height == 0:
-        log.warning("_encode_with_intro: ffprobe gave no dimensions, skipping intro")
-        if target_mb is not None and duration_sec > 0:
-            return _encode_targeted(input_path, output_path, wm, target_mb, duration_sec, light_mode)
-        return False
-
-    scale_720 = duration_sec > 90 and target_mb is not None
-    style = getattr(wm, "anim_style", "Snap") if wm is not None else "Snap"
-
-    try:
-        fc, extra_args = build_intro_filter_complex(
-            width, height, fps, wm, light_mode, has_audio, scale_720, style
-        )
-    except Exception as e:
-        log.warning("_encode_with_intro: filter_complex build failed: %s", e)
-        if target_mb is not None and duration_sec > 0:
-            return _encode_targeted(input_path, output_path, wm, target_mb, duration_sec, light_mode)
-        return False
-
-    total_dur = duration_sec + INTRO_DUR
-
-    if target_mb is not None:
-        video_kbps = max(200, int((target_mb * 8 * 1024 * 0.95) / max(1, total_dur)) - 96)
-        nvenc_args = [
-            "-c:v", "h264_nvenc",
-            "-rc", "vbr",
-            "-b:v", f"{video_kbps}k",
-            "-maxrate", f"{video_kbps * 2}k",
-            "-bufsize", f"{video_kbps * 4}k",
-            "-preset", "p5", "-tune", "hq",
-        ]
-        sw_args = [
-            "-c:v", "libx264",
-            "-b:v", f"{video_kbps}k",
-            "-preset", "fast",
-        ]
-    else:
-        nvenc_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "26"]
-        sw_args    = ["-c:v", "libx264", "-crf", "26", "-preset", "fast"]
-
-    common_tail = ["-pix_fmt", "yuv420p", "-movflags", "+faststart", str(output_path)]
-
-    def _run(encoder_args: list[str], timeout: int) -> bool:
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(input_path),
-            "-filter_complex", fc,
-            *extra_args,
-            *encoder_args,
-            *common_tail,
-        ]
-        log.debug("intro encode cmd: %s", " ".join(cmd[:20]) + " …")
-        try:
-            r = subprocess.run(cmd, capture_output=True, timeout=timeout)
-            if r.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
-                return True
-            stderr = r.stderr.decode(errors="replace").strip()
-            log.debug("intro encode failed (code %d): %s", r.returncode, stderr[-300:])
-            output_path.unlink(missing_ok=True)
-            return False
-        except subprocess.TimeoutExpired:
-            log.warning("intro encode timed out")
-            output_path.unlink(missing_ok=True)
-            return False
-        except OSError as e:
-            log.warning("intro encode OS error: %s", e)
-            output_path.unlink(missing_ok=True)
-            return False
-
-    if _run(nvenc_args, 300):
-        return True
-    log.info("intro NVENC failed, falling back to libx264")
-    return _run(sw_args, 420)
 
 
 def _record_metric(

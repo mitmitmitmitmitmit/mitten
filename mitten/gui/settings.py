@@ -1200,23 +1200,19 @@ class SettingsDialog(QWidget):
     def _make_watermark_tab(self) -> QWidget:
         page, form = self._page_wrapper()
 
-        _ANIM_STYLE_DESCS: dict[str, str] = {
-            "Snap":       "M fades in \u2192 i\u00b7t\u00b7t\u00b7e\u00b7n slam into place with an overshoot snap \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
-            "Ripple":     "M fades in \u2192 letters ripple in with a scale pulse wave left-to-right \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
-            "Typewriter": "M appears \u2192 i\u00b7t\u00b7t\u00b7e\u00b7n type in instantly one-by-one, cursor blinks after N \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
-            "Broadcast":  "MITTEN materializes from a wide horizontal smear expanding vertically, CRT scan-in style \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
-            "Shatter":    "Letters converge simultaneously \u2014 odd from left, even from right \u2014 snapping to position \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
-            "Glitch":     "Letters flicker in with rapid alpha oscillation and horizontal jitter, corrupted signal aesthetic \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
-            "Rise":       "MITTEN drifts upward into place from staggered vertical offsets, slow and cinematic \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
-            "Flashframe": "Letters burst in with a white bloom flash that decays instantly, like a camera shutter moment \u2192 v0.3 + \u201cClipped by [name]\u201d \u2192 fades to watermark.",
-        }
+        try:
+            from importlib.metadata import version as _pv
+            _hc_ver = _pv("mitten")
+        except Exception:
+            _hc_ver = ""
+        _hc_label = f"mitten v{_hc_ver}" if _hc_ver else "mitten"
 
         # ── Hardcoded watermark notice ─────────────────────────────────────────
         form.addRow(_sep("HARDCODED WATERMARK"))
 
         hc_note = QLabel(
-            "Mitten is freemium \u2014 every clip includes a hardcoded \u201cmitten\u201d watermark "
-            "and optional intro animation that cannot be removed. Add your own on top."
+            f"Every clip includes a hardcoded \u201c{_hc_label}\u201d watermark that cannot be removed. "
+            "Add your own on top."
         )
         hc_note.setWordWrap(True)
         hc_note.setStyleSheet(
@@ -1305,59 +1301,8 @@ class SettingsDialog(QWidget):
         self._wm_padding.setValue(20)
         form.addRow("Padding", self._wm_padding)
 
-        # ── Animation ──────────────────────────────────────────────────────────
-        form.addRow(_sep("ANIMATION"))
-
-        self._wm_anim_enabled = QCheckBox("Enable intro animation")
-        self._wm_anim_enabled.setChecked(True)
-        self._wm_anim_enabled.toggled.connect(self._toggle_anim_fields)
-        form.addRow("", self._wm_anim_enabled)
-
-        self._wm_anim_desc = QLabel()
-        self._wm_anim_desc.setWordWrap(True)
-        self._wm_anim_desc.setStyleSheet(
-            f"color: {C.SUBTEXT}; font-size: 10px; font-style: italic; background: transparent;"
-        )
-        form.addRow("", self._wm_anim_desc)
-
-        self._wm_anim_style = QComboBox()
-        self._wm_anim_style.addItems([
-            "Snap", "Ripple", "Typewriter", "Broadcast",
-            "Shatter", "Glitch", "Rise", "Flashframe",
-        ])
-
-        def _on_style_changed(style: str) -> None:
-            self._wm_anim_desc.setText(_ANIM_STYLE_DESCS.get(style, ""))
-
-        self._wm_anim_style.currentTextChanged.connect(_on_style_changed)
-        _on_style_changed(self._wm_anim_style.currentText())
-        form.addRow("Animation style", self._wm_anim_style)
-
-        self._wm_intro_name = QLineEdit()
-        self._wm_intro_name.setPlaceholderText("your name (e.g. mit)")
-        name_hint = QLabel(
-            "shown as \u201cClipped by [name] on Linux/Windows\u201d at the end of the intro"
-        )
-        name_hint.setWordWrap(True)
-        name_hint.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px;")
-        name_col = QVBoxLayout()
-        name_col.setSpacing(2)
-        name_col.addWidget(self._wm_intro_name)
-        name_col.addWidget(name_hint)
-        form.addRow("Your name", name_col)
-
         # ── Preview ────────────────────────────────────────────────────────────
-        prev_hdr = QHBoxLayout()
-        prev_hdr.setSpacing(8)
-        prev_hdr.addWidget(_sep("PREVIEW"), 1)
-        self._wm_preview_anim_btn = QPushButton("\u25b6  Play animation")
-        self._wm_preview_anim_btn.setProperty("class", "secondary")
-        self._wm_preview_anim_btn.setSizePolicy(
-            QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
-        )
-        self._wm_preview_anim_btn.clicked.connect(self._play_wm_anim_preview)
-        prev_hdr.addWidget(self._wm_preview_anim_btn)
-        form.addRow("", prev_hdr)
+        form.addRow(_sep("PREVIEW"))
 
         self._wm_preview = QFrame()
         self._wm_preview.setMinimumHeight(200)
@@ -1368,8 +1313,8 @@ class SettingsDialog(QWidget):
         prev_layout = QVBoxLayout(self._wm_preview)
         prev_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Hardcoded "mitten" always shows bottom-left
-        self._wm_preview_hc = QLabel("mitten")
+        # Hardcoded "mitten v{ver}" always shows bottom-left
+        self._wm_preview_hc = QLabel(_hc_label)
         self._wm_preview_hc.setAlignment(
             Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignLeft
         )
@@ -1395,16 +1340,6 @@ class SettingsDialog(QWidget):
         corner_row.addWidget(self._wm_preview_hc)
         corner_row.addWidget(self._wm_preview_label, 1)
 
-        # Animation preview label (center, hidden by default)
-        self._wm_anim_preview_lbl = QLabel()
-        self._wm_anim_preview_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._wm_anim_preview_lbl.setStyleSheet(
-            "color: white; font-size: 32px; font-weight: 700;"
-            "background: transparent; border: none;"
-        )
-        self._wm_anim_preview_lbl.hide()
-
-        prev_layout.addWidget(self._wm_anim_preview_lbl, 1)
         prev_layout.addLayout(corner_row)
         form.addRow("", self._wm_preview)
 
@@ -1413,10 +1348,6 @@ class SettingsDialog(QWidget):
             self._wm_fontsize, self._wm_fontcolor, self._wm_position,
             self._wm_padding,
         ]
-        self._wm_anim_fields = [self._wm_anim_style, self._wm_intro_name]
-        self._wm_anim_timer: QTimer | None = None
-        self._wm_anim_step = 0
-
         self._update_wm_preview()
         return page
 
@@ -1462,43 +1393,6 @@ class SettingsDialog(QWidget):
             )
         except Exception:
             pass
-
-    def _play_wm_anim_preview(self) -> None:
-        """Play a simple Qt-driven letter pop-in animation in the preview frame."""
-        letters = list("MITTEN")
-        self._wm_anim_step = 0
-        self._wm_anim_preview_lbl.setText("")
-        self._wm_anim_preview_lbl.show()
-        self._wm_preview_anim_btn.setEnabled(False)
-
-        style = self._wm_anim_style.currentText() if hasattr(self, "_wm_anim_style") else "Snap"
-
-        if self._wm_anim_timer:
-            self._wm_anim_timer.stop()
-
-        # interval between letters depends on style
-        interval = 120 if style == "Typewriter" else 180
-
-        def _tick() -> None:
-            step = self._wm_anim_step
-            if step <= len(letters):
-                shown = "".join(letters[:step])
-                self._wm_anim_preview_lbl.setText(shown or "\u00a0")
-                self._wm_anim_step += 1
-            else:
-                # Hold then fade out
-                self._wm_anim_timer.stop()
-                QTimer.singleShot(800, _finish)
-
-        def _finish() -> None:
-            self._wm_anim_preview_lbl.hide()
-            self._wm_anim_preview_lbl.setText("")
-            self._wm_preview_anim_btn.setEnabled(True)
-
-        self._wm_anim_timer = QTimer(self)
-        self._wm_anim_timer.setInterval(interval)
-        self._wm_anim_timer.timeout.connect(_tick)
-        self._wm_anim_timer.start()
 
     def _make_games_tab(self) -> QWidget:
         page, form = self._page_wrapper()
@@ -1894,10 +1788,6 @@ class SettingsDialog(QWidget):
         for w in self._wm_fields:
             w.setEnabled(checked)
 
-    def _toggle_anim_fields(self, checked: bool) -> None:
-        for w in self._wm_anim_fields:
-            w.setEnabled(checked)
-
     def _toggle_notify_fields(self, checked: bool) -> None:
         for w in (self._notif_start, self._notif_save, self._notif_error):
             w.setEnabled(checked)
@@ -2042,11 +1932,7 @@ class SettingsDialog(QWidget):
         self._wm_fontcolor.setText(wm.fontcolor)
         self._wm_position.setCurrentText(wm.position)
         self._wm_padding.setValue(wm.padding)
-        self._wm_intro_name.setText(wm.intro_name)
-        self._wm_anim_enabled.setChecked(wm.anim_enabled)
-        self._wm_anim_style.setCurrentText(getattr(wm, "anim_style", "Snap"))
         self._toggle_watermark_fields(wm.enabled)
-        self._toggle_anim_fields(wm.anim_enabled)
 
         gd = cfg.game_detection
         self._gd_poll.setValue(gd.poll_interval)
@@ -2302,9 +2188,6 @@ class SettingsDialog(QWidget):
                 fontcolor=self._wm_fontcolor.text(),
                 position=self._wm_position.currentText(),
                 padding=self._wm_padding.value(),
-                intro_name=self._wm_intro_name.text().strip(),
-                anim_enabled=self._wm_anim_enabled.isChecked(),
-                anim_style=self._wm_anim_style.currentText(),
             ),
             game_detection=GameDetectionConfig(
                 enabled=True,

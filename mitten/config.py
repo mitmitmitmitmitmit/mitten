@@ -74,9 +74,6 @@ class WatermarkConfig:
     fontcolor: str = "white@0.6"
     position: str = "bottom_right"
     padding: int = 20
-    intro_name: str = ""   # shown as "Clipped by [name] on [OS]" in the intro animation
-    anim_enabled: bool = True  # whether the MITTEN letter intro plays (hardcoded wm always shown)
-    anim_style: str = "Snap"   # animation style: Snap, Rise, Typewriter, Glitch, Ripple, Shatter, Broadcast, Flashframe
 
 
 @dataclass(frozen=True)
@@ -226,9 +223,6 @@ def load_config(config_path: Path | None = None) -> MittenConfig:
             fontcolor=str(wm.get("fontcolor", "white@0.6")),
             position=str(wm.get("position", "bottom_right")),
             padding=int(wm.get("padding", 20)),
-            intro_name=str(wm.get("intro_name", "")),
-            anim_enabled=bool(wm.get("anim_enabled", True)),
-            anim_style=str(wm.get("anim_style", "Snap")),
         ),
         game_detection=GameDetectionConfig(
             enabled=bool(gd.get("enabled", True)),
