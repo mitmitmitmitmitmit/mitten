@@ -26,11 +26,28 @@ _BANNER = r"""
 
 def run_wizard() -> None:
     """Run the terminal installer and return when done."""
+    if sys.stdin is None:
+        # Frozen windowed app (PyInstaller --windowed) — no terminal available.
+        # Run a silent setup using all defaults.
+        _run_silent()
+        return
     try:
         _run_installer()
     except KeyboardInterrupt:
         print("\n\n  Setup cancelled.")
         sys.exit(0)
+
+
+def _run_silent() -> None:
+    """Silent first-run setup for frozen windowed builds (no stdin/stdout)."""
+    from .config import CONFIG_FILE, create_default_config
+    from .gui.system_setup import install_autostart, install_service
+
+    if not CONFIG_FILE.exists():
+        create_default_config()
+
+    install_service()
+    install_autostart()
 
 
 def _run_installer() -> None:
