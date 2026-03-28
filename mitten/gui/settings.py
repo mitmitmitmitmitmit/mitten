@@ -1109,7 +1109,6 @@ class SettingsDialog(QWidget):
         form.addRow(_sep("MIC"))
 
         self._mic_combo = QComboBox()
-        self._mic_combo.setEditable(True)
         self._mic_combo.addItem("(no mic)", "")
         _input_prefixes = ("alsa_input.", "default_input", "bluez_input.")
         try:
@@ -1144,11 +1143,16 @@ class SettingsDialog(QWidget):
         self._mic_noise_cb = QCheckBox("Reduce background noise")
         form.addRow("", self._mic_noise_cb)
 
-        # Ducking
+        # Ducking — checkbox + slider in one container (no orphaned label row)
+        self._mic_duck_section = QWidget()
+        duck_v = QVBoxLayout(self._mic_duck_section)
+        duck_v.setContentsMargins(0, 0, 0, 0)
+        duck_v.setSpacing(5)
         self._mic_duck_cb = QCheckBox("Lower game audio when speaking")
-        form.addRow("", self._mic_duck_cb)
-
-        duck_amt_row = QHBoxLayout()
+        duck_v.addWidget(self._mic_duck_cb)
+        self._mic_duck_amt_widget = QWidget()
+        duck_amt_row = QHBoxLayout(self._mic_duck_amt_widget)
+        duck_amt_row.setContentsMargins(18, 0, 0, 0)
         duck_amt_row.setSpacing(8)
         self._mic_duck_slider = QSlider(Qt.Orientation.Horizontal)
         self._mic_duck_slider.setRange(0, 100)
@@ -1159,11 +1163,11 @@ class SettingsDialog(QWidget):
         )
         duck_amt_row.addWidget(self._mic_duck_slider, 1)
         duck_amt_row.addWidget(self._mic_duck_label)
-        self._mic_duck_amt_widget = QWidget()
-        self._mic_duck_amt_widget.setLayout(duck_amt_row)
-        form.addRow("Duck amount", self._mic_duck_amt_widget)
-
+        duck_v.addWidget(self._mic_duck_amt_widget)
+        self._mic_duck_amt_widget.setVisible(False)
         self._mic_duck_cb.toggled.connect(self._mic_duck_amt_widget.setVisible)
+        form.addRow("", self._mic_duck_section)
+
         self._toggle_mic_fields(self._mic_combo.currentIndex())
 
         return page
@@ -1825,10 +1829,10 @@ class SettingsDialog(QWidget):
     def _toggle_mic_fields(self, _index: int = 0) -> None:
         has_mic = bool(self._mic_combo.currentData() or
                        (self._mic_combo.currentText().strip() not in ("", "(no mic)")))
-        for w in (self._mic_vol_widget, self._mic_noise_cb, self._mic_duck_cb):
+        for w in (self._mic_vol_widget, self._mic_noise_cb, self._mic_duck_section):
             w.setEnabled(has_mic)
-        self._mic_duck_amt_widget.setEnabled(has_mic)
-        self._mic_duck_amt_widget.setVisible(has_mic and self._mic_duck_cb.isChecked())
+        if not has_mic:
+            self._mic_duck_amt_widget.setVisible(False)
 
     def _on_theme_changed(self, name: str) -> None:
         if name != "Light":
