@@ -27,6 +27,22 @@ from .discord_presence import DiscordPresence
 log = logging.getLogger(__name__)
 
 
+def _recorder_settings_changed(old: MittenConfig, new: MittenConfig) -> bool:
+    """Return True only if a setting that actually affects the gsr process changed."""
+    og, ng = old.general, new.general
+    or_, nr = old.recorder, new.recorder
+    return (
+        og.monitor      != ng.monitor      or
+        og.framerate    != ng.framerate    or
+        og.buffer_seconds != ng.buffer_seconds or
+        or_.quality       != nr.quality       or
+        or_.capture_codec != nr.capture_codec or
+        or_.container     != nr.container     or
+        or_.audio_device  != nr.audio_device  or
+        or_.mic_device    != nr.mic_device
+    )
+
+
 class ClipWatcher:
     """
     Polls TMP_DIR for new .mp4 files written by gpu-screen-recorder on SIGUSR1.
@@ -575,9 +591,11 @@ class MittenDaemon:
                 log.info("Config reload: game mode active, detector started")
 
         else:
-            if self._recorder.is_running():
+            if self._recorder.is_running() and _recorder_settings_changed(self._config, new_cfg):
                 self._recorder.restart()
-                log.info("Config reload: settings updated, recorder restarted")
+                log.info("Config reload: recorder settings changed, restarted")
+            else:
+                log.info("Config reload: non-recorder settings updated, recorder kept running")
 
         log.info("Config reloaded (mode: %s → %s)", old_mode, new_mode)
 

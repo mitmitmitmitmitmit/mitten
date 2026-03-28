@@ -627,7 +627,7 @@ def _preprocess_mic_audio(raw_path: Path, cfg: MittenConfig) -> bool:
         mic_chain = "[0:a:1]"
 
         if noise_red:
-            filters.append(f"{mic_chain}arnndn[mic_nr]")
+            filters.append(f"{mic_chain}afftdn=nf=-25[mic_nr]")
             mic_chain = "[mic_nr]"
 
         if mic_vol != 1.0:
@@ -649,7 +649,7 @@ def _preprocess_mic_audio(raw_path: Path, cfg: MittenConfig) -> bool:
         # Only mic stream
         mic_chain = "[0:a:0]"
         if noise_red:
-            filters.append(f"{mic_chain}arnndn[mic_nr]")
+            filters.append(f"{mic_chain}afftdn=nf=-25[mic_nr]")
             mic_chain = "[mic_nr]"
         if mic_vol != 1.0:
             filters.append(f"{mic_chain}volume={mic_vol:.3f}[aout]")
