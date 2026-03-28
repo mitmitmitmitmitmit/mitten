@@ -17,7 +17,9 @@ from ..config import GUI_SOCKET
 
 
 def _is_already_running() -> bool:
-    """Check if another MITTEN GUI instance is running via a Unix socket lock."""
+    """Check if another MITTEN GUI instance is running via a socket lock."""
+    if not hasattr(socket, "AF_UNIX"):
+        return False  # AF_UNIX not available on this platform
     sock_path = str(GUI_SOCKET)
     if os.path.exists(sock_path):
         try:
@@ -34,7 +36,9 @@ def _is_already_running() -> bool:
 
 
 def _create_lock() -> socket.socket | None:
-    """Create a Unix socket lock so only one GUI instance runs."""
+    """Create a socket lock so only one GUI instance runs."""
+    if not hasattr(socket, "AF_UNIX"):
+        return None  # AF_UNIX not available on this platform
     sock_path = str(GUI_SOCKET)
     os.makedirs(os.path.dirname(sock_path), exist_ok=True)
     try:
