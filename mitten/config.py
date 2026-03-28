@@ -5,15 +5,23 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
+import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".config" / "mitten"
+if sys.platform == "win32":
+    CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "mitten"
+    TMP_DIR = Path(tempfile.gettempdir()) / "mitten"
+    DATA_DIR = CONFIG_DIR / "data"
+else:
+    CONFIG_DIR = Path.home() / ".config" / "mitten"
+    TMP_DIR = Path("/tmp/mitten")
+    DATA_DIR = Path.home() / ".local" / "share" / "mitten"
+
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 DEFAULT_CONFIG_SRC = Path(__file__).parent.parent / "default_config.toml"
-
-TMP_DIR = Path("/tmp/mitten")
 PID_FILE = TMP_DIR / "mitten.pid"
 GUI_SOCKET = TMP_DIR / "gui.sock"
 GUI_PRESENCE_FILE = TMP_DIR / "gui_presence.json"  # written by GUI when focused, read by daemon

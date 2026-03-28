@@ -71,6 +71,10 @@ _EXTENSIONS = (".oga", ".ogg", ".wav", ".mp3")
 # ── Discovery ─────────────────────────────────────────────────────────────────
 
 def _sound_dirs() -> list[Path]:
+    # Windows has no XDG paths — sound discovery is skipped entirely
+    if sys.platform == "win32":
+        return []
+
     dirs: list[Path] = []
 
     # User sounds first
@@ -108,6 +112,11 @@ def _find_sound(event: str) -> Path | None:
 
 def _get_player() -> str | None:
     """Return the name of the first available audio CLI player."""
+    if sys.platform == "win32":
+        # paplay and pw-play are Linux-only; skip straight to ffplay
+        if shutil.which("ffplay"):
+            return "ffplay"
+        return None
     for player in ("paplay", "pw-play", "ffplay"):
         if shutil.which(player):
             return player
@@ -117,6 +126,12 @@ def _get_player() -> str | None:
 def _play_file(path: Path) -> None:
     player = _get_player()
     if player is None:
+        if sys.platform == "win32" and path.parent == _ASSETS_DIR:
+            log.warning(
+                "ffplay not found on Windows — cannot play bundled sound %s. "
+                "Install ffmpeg and ensure ffplay is on PATH.",
+                path.name,
+            )
         return
 
     try:

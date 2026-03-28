@@ -136,12 +136,21 @@ def _show_crash_dialog(exc_type: type, exc_value: BaseException, tb_text: str) -
             "border-radius: 6px; padding: 7px 16px; font-weight: 600; }"
             "QPushButton:hover { background: #585b70; }"
         )
-        open_btn.clicked.connect(
-            lambda: _sp.Popen(
-                ["xdg-open", str(_LOG_DIR)],
-                stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+        import sys as _sys
+        if _sys.platform == "win32":
+            open_btn.clicked.connect(
+                lambda: _sp.Popen(
+                    ["explorer", str(_LOG_DIR)],
+                    stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                )
             )
-        )
+        else:
+            open_btn.clicked.connect(
+                lambda: _sp.Popen(
+                    ["xdg-open", str(_LOG_DIR)],
+                    stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                )
+            )
 
         revert_btn = QPushButton("Revert to previous version")
         revert_btn.setStyleSheet(

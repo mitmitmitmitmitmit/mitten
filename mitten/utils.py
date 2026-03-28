@@ -5,6 +5,7 @@ Centralises helpers that were previously duplicated across main_window.py and st
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -44,15 +45,16 @@ def get_vram_usage() -> tuple[float, float] | None:
     except Exception:
         pass
 
-    # AMD — read from sysfs (best-effort)
-    try:
-        used_path = Path("/sys/class/drm/card0/device/mem_info_vram_used")
-        total_path = Path("/sys/class/drm/card0/device/mem_info_vram_total")
-        if used_path.exists() and total_path.exists():
-            used_b = int(used_path.read_text().strip())
-            total_b = int(total_path.read_text().strip())
-            return used_b / (1024 ** 3), total_b / (1024 ** 3)
-    except Exception:
-        pass
+    # AMD — read from sysfs (best-effort, Linux only)
+    if sys.platform != "win32":
+        try:
+            used_path = Path("/sys/class/drm/card0/device/mem_info_vram_used")
+            total_path = Path("/sys/class/drm/card0/device/mem_info_vram_total")
+            if used_path.exists() and total_path.exists():
+                used_b = int(used_path.read_text().strip())
+                total_b = int(total_path.read_text().strip())
+                return used_b / (1024 ** 3), total_b / (1024 ** 3)
+        except Exception:
+            pass
 
     return None

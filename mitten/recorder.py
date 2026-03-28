@@ -9,6 +9,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -24,9 +25,24 @@ _CRASH_WINDOW = 30.0  # seconds
 
 def detect_monitor() -> str:
     """
-    Detect the primary Wayland output name.
-    Returns a specific output name like 'DP-1', or 'screen' as fallback.
+    Detect the primary display output name.
+    On Windows, uses screeninfo to get the primary monitor.
+    On Linux, queries kscreen-doctor or wlr-randr.
+    Returns a specific output name like 'DP-1' or '\\\\.\\DISPLAY1', or 'screen' as fallback.
     """
+    if sys.platform == "win32":
+        try:
+            from screeninfo import get_monitors
+            for m in get_monitors():
+                if getattr(m, "is_primary", False):
+                    return m.name or "screen"
+            monitors = get_monitors()
+            if monitors:
+                return monitors[0].name or "screen"
+        except Exception:
+            pass
+        return "screen"
+
     # Try kscreen-doctor (KDE Plasma, most reliable here)
     try:
         out = subprocess.check_output(
@@ -328,3 +344,82 @@ class SessionRecorder:
                 return path
             log.warning("Session output missing or empty: %s", path)
             return None
+
+
+# ── Windows OBS WebSocket recorder ───────────────────────────────────────────
+
+if sys.platform == "win32":
+    class ObsRecorder:
+        """
+        Windows recorder backend: controls OBS via WebSocket (obsws-python).
+        Uses OBS's built-in replay buffer instead of gpu-screen-recorder.
+        """
+
+        def __init__(
+            self,
+            config: MittenConfig,
+            on_crash: Callable[[str], None] | None = None,
+        ) -> None:
+            self.config = config
+            self.on_crash = on_crash
+            self._client = None
+            self._running = False
+
+        def start(self, target: str = "auto") -> None:
+            try:
+                import obsws_python as obs
+                self._client = obs.ReqClient(
+                    host="localhost", port=4455, password="", timeout=3
+                )
+                self._client.start_replay_buffer()
+                self._running = True
+                log.info("OBS replay buffer started")
+            except Exception as e:
+                log.error("ObsRecorder start failed: %s", e)
+                if self.on_crash:
+                    self.on_crash(str(e))
+
+        def stop(self) -> None:
+            if self._client:
+                try:
+                    self._client.stop_replay_buffer()
+                except Exception:
+                    pass
+            self._running = False
+            self._client = None
+
+        def restart(self, target: str | None = None) -> None:
+            self.stop()
+            self.start(target=target or "auto")
+
+        def save_replay(self) -> bool:
+            if self._client:
+                try:
+                    self._client.save_replay_buffer()
+                    log.info("OBS replay buffer save requested")
+                    return True
+                except Exception as e:
+                    log.error("ObsRecorder save_replay failed: %s", e)
+                    if self.on_crash:
+                        self.on_crash(str(e))
+            return False
+
+        def is_running(self) -> bool:
+            return self._running
+
+        def build_command(self, target: str | None = None) -> list[str]:
+            return ["obs", "--replay-buffer"]
+
+        @property
+        def pid(self) -> None:
+            return None
+
+
+def make_recorder(
+    config: MittenConfig,
+    on_crash: Callable[[str], None] | None = None,
+):
+    """Factory: returns ObsRecorder on Windows, GpuRecorder on Linux."""
+    if sys.platform == "win32":
+        return ObsRecorder(config, on_crash)
+    return GpuRecorder(config, on_crash)

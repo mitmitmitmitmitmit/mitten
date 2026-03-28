@@ -214,8 +214,13 @@ def _display_env() -> dict:
     Return a copy of the environment with WAYLAND_DISPLAY and
     DBUS_SESSION_BUS_ADDRESS filled in if they are missing.
     Needed when spawning GUI processes from a systemd service.
+    On Windows, returns os.environ.copy() unchanged.
     """
     env = os.environ.copy()
+
+    if sys.platform == "win32":
+        return env
+
     uid = os.getuid()
 
     if not env.get("WAYLAND_DISPLAY"):
@@ -234,10 +239,28 @@ def _display_env() -> dict:
 
 def spawn_update_terminal(old_hash: str, new_hash: str) -> None:
     """
-    Launch: konsole --noclose -e mitten _update --from OLD --to NEW
+    Launch: konsole --noclose -e mitten _update --from OLD --to NEW  (Linux)
+    or:     cmd.exe /k mitten _update --from OLD --to NEW            (Windows)
     Detached process (start_new_session=True).
-    Falls back to running the update UI inline if konsole is not found.
+    Falls back to running the update UI inline if no terminal is found.
     """
+    if sys.platform == "win32":
+        try:
+            cmd = [
+                "cmd.exe", "/k",
+                f"mitten _update --from {old_hash} --to {new_hash}",
+            ]
+            subprocess.Popen(
+                cmd,
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+            )
+            return
+        except Exception:
+            pass
+        # Fallback: run inline
+        run_update_ui(old_hash, new_hash)
+        return
+
     if shutil.which("konsole"):
         try:
             subprocess.Popen(
@@ -332,11 +355,14 @@ def run_update_ui(old_hash: str, new_hash: str) -> None:
                 pass
         print("      \u2713 GUI / tray processes terminated")
     except ImportError:
-        subprocess.run(
-            ["pkill", "-TERM", "-f", "mitten"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        print("      \u2713 pkill -TERM mitten (psutil unavailable)")
+        if sys.platform != "win32":
+            subprocess.run(
+                ["pkill", "-TERM", "-f", "mitten"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            print("      \u2713 pkill -TERM mitten (psutil unavailable)")
+        else:
+            print("      ! psutil unavailable on Windows — skipping process termination")
     print()
 
     # ── Step 3: fetch + reset ────────────────────────────────────────

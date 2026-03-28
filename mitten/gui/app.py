@@ -48,6 +48,9 @@ def _create_lock() -> socket.socket | None:
 
 def _check_wayland() -> None:
     """Show a one-time warning if not running under Wayland."""
+    if sys.platform == "win32":
+        return
+
     if (
         os.environ.get("WAYLAND_DISPLAY")
         or os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"

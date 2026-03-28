@@ -19,6 +19,7 @@ import logging
 import os
 import socket
 import struct
+import sys
 import threading
 import time
 import uuid
@@ -43,7 +44,12 @@ _PRESENCE_STATES: dict[str, tuple[str, str]] = {
 
 def _find_ipc_socket() -> str | None:
     """Probe known socket locations for a live Discord IPC pipe."""
-    runtime = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    if sys.platform == "win32":
+        # Windows uses named pipes — handled separately in _WinPipeHandle
+        return None
+
+    uid = os.getuid()
+    runtime = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{uid}")
     prefixes = [
         runtime,                                          # native Discord / Vesktop
         f"{runtime}/app/com.discordapp.Discord",          # Flatpak Discord
@@ -59,6 +65,47 @@ def _find_ipc_socket() -> str | None:
                     return str(p)
             except OSError:
                 continue
+    return None
+
+
+class _WinPipeHandle:
+    """
+    Thin wrapper around a Windows named pipe file handle so it behaves
+    like a socket for send/recv purposes (used by DiscordPresence._sock).
+    """
+
+    def __init__(self, handle) -> None:
+        self._handle = handle
+
+    def sendall(self, data: bytes) -> None:
+        total = 0
+        while total < len(data):
+            written = self._handle.write(data[total:])
+            self._handle.flush()
+            total += written if written else len(data)
+
+    def recv(self, n: int) -> bytes:
+        return self._handle.read(n)
+
+    def settimeout(self, timeout) -> None:
+        pass  # Named pipes don't support socket-style timeouts
+
+    def close(self) -> None:
+        try:
+            self._handle.close()
+        except Exception:
+            pass
+
+
+def _open_win_pipe():
+    """Open the first available Discord IPC named pipe on Windows."""
+    for i in range(10):
+        pipe_path = rf"\\.\pipe\discord-ipc-{i}"
+        try:
+            handle = open(pipe_path, "r+b", buffering=0)
+            return _WinPipeHandle(handle)
+        except OSError:
+            continue
     return None
 
 
@@ -175,23 +222,36 @@ class DiscordPresence:
             self._shutdown.wait(self._RECONNECT_DELAY)
 
     def _try_connect(self) -> None:
-        pipe = _find_ipc_socket()
-        if not pipe:
-            log.debug("discord ipc socket not found — discord not running?")
-            return
+        if sys.platform == "win32":
+            conn = _open_win_pipe()
+            if conn is None:
+                log.debug("discord ipc named pipe not found — discord not running?")
+                return
+        else:
+            pipe = _find_ipc_socket()
+            if not pipe:
+                log.debug("discord ipc socket not found — discord not running?")
+                return
+            try:
+                conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                conn.settimeout(self._SEND_TIMEOUT)
+                conn.connect(pipe)
+            except OSError as e:
+                log.debug("discord presence connect failed: %s", e)
+                with self._lock:
+                    self._sock = None
+                return
+
         try:
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.settimeout(self._SEND_TIMEOUT)
-            sock.connect(pipe)
             # Handshake (opcode 0)
-            self._sock = sock
+            self._sock = conn
             handshake = {"v": 1, "client_id": _CLIENT_ID}
             data = json.dumps(handshake).encode()
-            sock.sendall(struct.pack("<II", 0, len(data)) + data)
-            _opcode, resp = self._recv_frame(sock)
+            conn.sendall(struct.pack("<II", 0, len(data)) + data)
+            _opcode, resp = self._recv_frame(conn)
             if resp.get("evt") != "READY":
                 log.warning("discord handshake unexpected response: %s", resp.get("evt"))
-                sock.close()
+                conn.close()
                 self._sock = None
                 return
             with self._lock:

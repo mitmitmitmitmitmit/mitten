@@ -4,7 +4,6 @@ fires watermark post-processing, and coordinates game detection + trigger.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import os
@@ -15,9 +14,12 @@ import time
 from pathlib import Path
 from typing import Callable
 
+if sys.platform != "win32":
+    import fcntl
+
 from .config import MittenConfig, TMP_DIR, PID_FILE, PAUSE_FILE, RECORDER_DEAD_FILE, GUI_PRESENCE_FILE
 from .detect import GameDetector, GameInfo
-from .recorder import GpuRecorder, SessionRecorder
+from .recorder import GpuRecorder, SessionRecorder, make_recorder
 from .trigger import TriggerListener
 from . import notify, save, sounds
 from .errors import (fmt as _efmt, E_SAVE_TIMEOUT, E_RECORDER_DEAD, E_TRIGGER,
@@ -112,7 +114,8 @@ class MittenDaemon:
         self._verbose = verbose
         self._shutdown = threading.Event()
 
-        self._pid_fd = None  # held open for lifetime of process to maintain flock
+        self._pid_fd = None  # held open for lifetime of process to maintain flock (Linux)
+        self._filelock = None  # Windows filelock replacement
         self._save_timer: threading.Timer | None = None
         self._current_game: "GameInfo | None" = None
         self._presence = DiscordPresence()
@@ -121,7 +124,7 @@ class MittenDaemon:
         self._daemon_state_ov: str | None = None
         self._daemon_detail_ov: str | None = None
         self._daemon_name_ov: str | None = None
-        self._recorder = GpuRecorder(config, on_crash=self._on_recorder_crash)
+        self._recorder = make_recorder(config, on_crash=self._on_recorder_crash)
         self._session_recorder = SessionRecorder(config)
         self._watcher = ClipWatcher(on_clip_ready=self._on_clip_ready)
         self._trigger = TriggerListener(
@@ -467,6 +470,22 @@ class MittenDaemon:
         GUI_PRESENCE_FILE.unlink(missing_ok=True)
 
     def _lock_pid_file(self) -> None:
+        if sys.platform == "win32":
+            try:
+                from filelock import FileLock, Timeout
+                lock_path = str(PID_FILE) + ".lock"
+                self._filelock = FileLock(lock_path)
+                self._filelock.acquire(timeout=0)
+            except Exception:
+                log.error("daemon already running — exiting")
+                sys.exit(1)
+            try:
+                with open(PID_FILE, 'w') as f:
+                    f.write(str(os.getpid()))
+            except OSError as e:
+                log.warning("Could not write PID file: %s", e)
+            return
+
         try:
             self._pid_fd = open(PID_FILE, 'w')
             fcntl.flock(self._pid_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -618,6 +637,60 @@ class MittenDaemon:
 
         signal.signal(signal.SIGINT, _handle_shutdown)
         signal.signal(signal.SIGTERM, _handle_shutdown)
-        signal.signal(signal.SIGUSR1, _handle_save)
-        signal.signal(signal.SIGUSR2, _handle_pause)
-        signal.signal(signal.SIGHUP, _handle_reload)
+
+        if sys.platform != "win32":
+            signal.signal(signal.SIGUSR1, _handle_save)
+            signal.signal(signal.SIGUSR2, _handle_pause)
+            signal.signal(signal.SIGHUP, _handle_reload)
+        else:
+            # Windows: listen for JSON commands over TCP socket
+            threading.Thread(
+                target=self._ipc_listener,
+                name="ipc-listener",
+                daemon=True,
+            ).start()
+
+    def _ipc_listener(self) -> None:
+        """Windows IPC: accept JSON commands on TCP port 47821."""
+        import socket as _socket
+        from .daemon_utils import IPC_PORT
+        srv = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        srv.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+        try:
+            srv.bind(("127.0.0.1", IPC_PORT))
+            srv.listen(5)
+            srv.settimeout(1.0)
+            log.info("IPC listener started on port %d", IPC_PORT)
+            while not self._shutdown.is_set():
+                try:
+                    conn, _ = srv.accept()
+                except _socket.timeout:
+                    continue
+                except OSError:
+                    break
+                try:
+                    data = conn.recv(1024)
+                    conn.close()
+                    if data:
+                        msg = json.loads(data.decode())
+                        cmd = msg.get("cmd")
+                        if cmd == "save":
+                            log.info("IPC: save command received")
+                            self.trigger_save()
+                        elif cmd == "pause":
+                            log.info("IPC: pause command received")
+                            threading.Thread(target=self._toggle_pause, daemon=True).start()
+                        elif cmd == "reload":
+                            log.info("IPC: reload command received")
+                            threading.Thread(target=self._reload_config, daemon=True).start()
+                        else:
+                            log.warning("IPC: unknown command %r", cmd)
+                except Exception as e:
+                    log.debug("IPC listener error: %s", e)
+        except OSError as e:
+            log.error("IPC listener could not bind: %s", e)
+        finally:
+            try:
+                srv.close()
+            except Exception:
+                pass

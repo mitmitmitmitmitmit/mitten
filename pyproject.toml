@@ -1,6 +1,6 @@
 [project]
 name = "mitten"
-version = "0.3.6.4"
+version = "0.3.7"
 description = "Personal Linux screen recording clip tool"
 requires-python = ">=3.11"
 dependencies = [
@@ -17,6 +17,14 @@ build-backend = "setuptools.build_meta"
 
 [project.optional-dependencies]
 stats = ["psutil>=5.9"]
+windows = [
+    "pynput>=1.7",
+    "obsws-python>=1.6",
+    "winotify>=1.1",
+    "filelock>=3.12",
+    "screeninfo>=0.8",
+    "psutil>=5.9",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

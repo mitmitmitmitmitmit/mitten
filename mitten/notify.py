@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -22,7 +23,16 @@ def notify(
     icon: str = "video-display",
     timeout_ms: int = 5000,
 ) -> None:
-    """Send a desktop notification via notify-send (non-blocking)."""
+    """Send a desktop notification (non-blocking)."""
+    if sys.platform == "win32":
+        try:
+            from winotify import Notification
+            toast = Notification(app_id="Mitten", title=summary, msg=body or "")
+            toast.show()
+        except Exception:
+            pass
+        return
+
     cmd = [
         "notify-send",
         "-a", _APP_NAME,
@@ -60,6 +70,22 @@ def notify_with_actions(
     clicks that action. Runs notify-send --wait in a background thread.
     Falls back to plain notify() if actions is None or empty.
     """
+    if sys.platform == "win32":
+        if not actions:
+            notify(summary, body, urgency, icon, timeout_ms)
+            return
+        try:
+            from winotify import Notification
+            toast = Notification(app_id="Mitten", title=summary, msg=body or "")
+            # Map first two actions to winotify buttons
+            action_items = list(actions.items())
+            for _action_id, (label, callback) in action_items[:2]:
+                toast.add_actions(label=label, launch=label)
+            toast.show()
+        except Exception:
+            notify(summary, body, urgency, icon, timeout_ms)
+        return
+
     if not actions:
         notify(summary, body, urgency, icon, timeout_ms)
         return

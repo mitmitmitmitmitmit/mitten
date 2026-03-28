@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -54,6 +55,17 @@ def check_dependencies() -> dict[str, bool]:
     Return a dict mapping binary name → True if found on PATH.
     Read-only — does not attempt to install anything.
     """
+    if sys.platform == "win32":
+        obs_found = (
+            shutil.which("obs64.exe") is not None
+            or shutil.which("obs.exe") is not None
+        )
+        ffmpeg_found = shutil.which("ffmpeg") is not None
+        return {
+            "obs": obs_found,
+            "ffmpeg": ffmpeg_found,
+        }
+
     result = {name: (shutil.which(name) is not None) for name in _RUNTIME_DEPS}
     result["python-evdev"] = check_evdev()
     return result
@@ -67,8 +79,22 @@ def install_dependencies() -> dict[str, bool]:
     """
     Attempt to install any missing runtime binaries.
     Returns dict of name → True if now present (already was or just installed).
-    Aborts with a printed message if not on an Arch-based system.
+    Aborts with a printed message if not on an Arch-based system or Windows.
     """
+    if sys.platform == "win32":
+        print(
+            "\n  MITTEN on Windows requires OBS Studio and ffmpeg.\n"
+            "  Install them with winget:\n"
+            "    winget install OBSProject.OBSStudio\n"
+            "    winget install Gyan.FFmpeg\n"
+        )
+        obs_found = (
+            shutil.which("obs64.exe") is not None
+            or shutil.which("obs.exe") is not None
+        )
+        ffmpeg_found = shutil.which("ffmpeg") is not None
+        return {"obs": obs_found, "ffmpeg": ffmpeg_found}
+
     if not is_arch_based():
         print(
             "\n  MITTEN currently requires an Arch-based distro (pacman not found).\n"
@@ -156,7 +182,9 @@ def install_dependencies() -> dict[str, bool]:
 # ------------------------------------------------------------------ #
 
 def check_input_group() -> bool:
-    """True if the current user is in the 'input' group."""
+    """True if the current user is in the 'input' group (always True on Windows)."""
+    if sys.platform == "win32":
+        return True
     import grp
     import os
     try:
@@ -174,7 +202,11 @@ def install_desktop_file() -> None:
     """
     Install mitten.desktop to ~/.local/share/applications/ and
     mitten.png to ~/.local/share/icons/hicolor/128x128/apps/.
+    No-op on Windows (no .desktop concept).
     """
+    if sys.platform == "win32":
+        return
+
     apps_dir = Path.home() / ".local" / "share" / "applications"
     icons_dir = Path.home() / ".local" / "share" / "icons" / "hicolor" / "128x128" / "apps"
     apps_dir.mkdir(parents=True, exist_ok=True)
@@ -219,11 +251,33 @@ def install_desktop_file() -> None:
 # systemd service
 # ------------------------------------------------------------------ #
 
+def _install_service_windows() -> bool:
+    """Add a Windows registry Run key so mitten launches on login."""
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+            0, winreg.KEY_SET_VALUE,
+        )
+        winreg.SetValueEx(key, "Mitten", 0, winreg.REG_SZ, "mitten")
+        winreg.CloseKey(key)
+        return True
+    except Exception as e:
+        print(f"  Failed to add registry autostart key: {e}")
+        return False
+
+
 def install_service() -> bool:
     """
-    Copy mitten.service to ~/.config/systemd/user/, daemon-reload, enable.
+    Install autostart / service integration.
+    On Linux: copies mitten.service to ~/.config/systemd/user/.
+    On Windows: adds a registry Run key for autostart.
     Returns True on success.
     """
+    if sys.platform == "win32":
+        return _install_service_windows()
+
     if not shutil.which("systemctl"):
         print("  systemctl not found — skipping service install.")
         return False
@@ -265,7 +319,11 @@ def install_service() -> bool:
 # ------------------------------------------------------------------ #
 
 def install_autostart() -> None:
-    """Write ~/.config/autostart/mitten-autostart.desktop."""
+    """Install autostart: registry Run key on Windows, .desktop file on Linux."""
+    if sys.platform == "win32":
+        _install_service_windows()
+        return
+
     autostart_dir = Path.home() / ".config" / "autostart"
     autostart_dir.mkdir(parents=True, exist_ok=True)
     (autostart_dir / "mitten-autostart.desktop").write_text(
@@ -279,7 +337,21 @@ def install_autostart() -> None:
 
 
 def remove_autostart() -> None:
-    """Remove the autostart .desktop file if present."""
+    """Remove the autostart entry (registry key on Windows, .desktop file on Linux)."""
+    if sys.platform == "win32":
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+                0, winreg.KEY_SET_VALUE,
+            )
+            winreg.DeleteValue(key, "Mitten")
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+        return
+
     f = Path.home() / ".config" / "autostart" / "mitten-autostart.desktop"
     if f.exists():
         f.unlink()

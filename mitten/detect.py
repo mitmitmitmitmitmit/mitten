@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,7 +82,8 @@ class GameDetector:
     def _tick(self) -> None:
         if self._active is not None:
             # Check if the known game is still running
-            if not Path(f"/proc/{self._active.pid}").exists():
+            alive = self._pid_alive(self._active.pid)
+            if not alive:
                 old = self._active
                 self._active = None
                 log.info("Game stopped: %s (pid %d)", old.name, old.pid)
@@ -98,12 +100,29 @@ class GameDetector:
             )
             self._on_start(game)
 
+    @staticmethod
+    def _pid_alive(pid: int) -> bool:
+        if sys.platform == "win32":
+            try:
+                import psutil
+                return psutil.pid_exists(pid)
+            except Exception:
+                return False
+        return Path(f"/proc/{pid}").exists()
+
     def _scan_for_game(self) -> GameInfo | None:
-        """Scan /proc for a running game. Returns first match."""
-        try:
-            pids = [int(p) for p in os.listdir("/proc") if p.isdigit()]
-        except PermissionError:
-            return None
+        """Scan running processes for a known game. Returns first match."""
+        if sys.platform == "win32":
+            try:
+                import psutil
+                pids = psutil.pids()
+            except Exception:
+                return None
+        else:
+            try:
+                pids = [int(p) for p in os.listdir("/proc") if p.isdigit()]
+            except PermissionError:
+                return None
 
         custom_procs = set(self._config.game_detection.custom_processes)
 
@@ -116,9 +135,10 @@ class GameDetector:
 
     def _check_pid(self, pid: int, custom_procs: set[str]) -> GameInfo | None:
         """Check a single PID against all detection strategies."""
-        proc_path = Path(f"/proc/{pid}")
-        if not proc_path.exists():
-            return None
+        if sys.platform != "win32":
+            proc_path = Path(f"/proc/{pid}")
+            if not proc_path.exists():
+                return None
 
         # 1. Steam (SteamAppId env var)
         game = _detect_steam(pid)
@@ -148,7 +168,7 @@ class GameDetector:
         return None
 
 # ------------------------------------------------------------------ #
-# Detection helpers — read /proc directly
+# Detection helpers — read /proc directly (Linux) or psutil (Windows)
 # ------------------------------------------------------------------ #
 
 def _read_file(path: str) -> bytes:
@@ -160,16 +180,41 @@ def _read_file(path: str) -> bytes:
 
 
 def _read_comm(pid: int) -> str | None:
+    if sys.platform == "win32":
+        try:
+            import psutil
+            return psutil.Process(pid).name()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return None
+        except Exception:
+            return None
     data = _read_file(f"/proc/{pid}/comm")
     return data.decode(errors="ignore").strip() or None
 
 
 def _read_cmdline(pid: int) -> str:
+    if sys.platform == "win32":
+        try:
+            import psutil
+            parts = psutil.Process(pid).cmdline()
+            return " ".join(parts)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return ""
+        except Exception:
+            return ""
     data = _read_file(f"/proc/{pid}/cmdline")
     return data.replace(b"\x00", b" ").decode(errors="ignore")
 
 
 def _read_environ_dict(pid: int) -> dict[str, str]:
+    if sys.platform == "win32":
+        try:
+            import psutil
+            return psutil.Process(pid).environ()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return {}
+        except Exception:
+            return {}
     data = _read_file(f"/proc/{pid}/environ")
     result = {}
     for part in data.split(b"\x00"):
@@ -180,6 +225,14 @@ def _read_environ_dict(pid: int) -> dict[str, str]:
 
 
 def _read_exe(pid: int) -> str:
+    if sys.platform == "win32":
+        try:
+            import psutil
+            return psutil.Process(pid).exe()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return ""
+        except Exception:
+            return ""
     try:
         return os.readlink(f"/proc/{pid}/exe")
     except (FileNotFoundError, PermissionError, OSError):
@@ -212,6 +265,16 @@ def _detect_steam(pid: int) -> GameInfo | None:
 
 def _steam_library_paths() -> list[Path]:
     """Return all Steam library folders, including secondary ones from libraryfolders.vdf."""
+    if sys.platform == "win32":
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam")
+            steam_path, _ = winreg.QueryValueEx(key, "SteamPath")
+            winreg.CloseKey(key)
+            return [Path(steam_path)]
+        except Exception:
+            return []
+
     steam_root = Path.home() / ".local" / "share" / "Steam"
     paths = [steam_root / "steamapps"]
     vdf = steam_root / "steamapps" / "libraryfolders.vdf"
@@ -291,6 +354,10 @@ def _detect_roblox(pid: int) -> GameInfo | None:
 
 
 def _detect_wine(pid: int) -> GameInfo | None:
+    # Wine/Proton detection is meaningless on Windows itself
+    if sys.platform == "win32":
+        return None
+
     exe = _read_exe(pid)
     if not exe:
         return None

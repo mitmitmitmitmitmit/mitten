@@ -5,12 +5,30 @@ that were previously duplicated across main_window.py, tray.py, and stats.py.
 """
 from __future__ import annotations
 
+import json
 import os
 import signal
+import socket
 import subprocess
+import sys
 from pathlib import Path
 
 from .config import PID_FILE
+
+IPC_PORT = 47821
+
+
+def _send_ipc_command(cmd: str) -> bool:
+    """Send a JSON IPC command to the daemon over TCP (Windows only)."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(3)
+        s.connect(("127.0.0.1", IPC_PORT))
+        s.sendall(json.dumps({"cmd": cmd}).encode())
+        s.close()
+        return True
+    except OSError:
+        return False
 
 
 def get_daemon_pid() -> int | None:
@@ -36,7 +54,11 @@ def get_daemon_pid() -> int | None:
 
     # Guard against recycled PIDs — verify it's actually a mitten/python process
     try:
-        comm = Path(f"/proc/{pid}/comm").read_text().strip()
+        if sys.platform == "win32":
+            import psutil
+            comm = psutil.Process(pid).name()
+        else:
+            comm = Path(f"/proc/{pid}/comm").read_text().strip()
         if "python" not in comm and "mitten" not in comm:
             try:
                 PID_FILE.unlink(missing_ok=True)
@@ -44,7 +66,9 @@ def get_daemon_pid() -> int | None:
                 pass
             return None
     except OSError:
-        pass  # /proc unavailable (non-Linux?); skip name check
+        pass  # /proc unavailable; skip name check
+    except Exception:
+        pass  # psutil error; skip name check
 
     return pid
 
@@ -91,6 +115,8 @@ def toggle_pause(pid: int) -> bool:
     Send SIGUSR2 to the daemon to pause/resume recording.
     Returns True on success, False if the process no longer exists.
     """
+    if sys.platform == "win32":
+        return _send_ipc_command("pause")
     try:
         os.kill(pid, signal.SIGUSR2)
         return True
@@ -103,6 +129,8 @@ def send_save_signal(pid: int) -> bool:
     Send SIGUSR1 to the daemon to trigger a replay save.
     Returns True on success, False if the process no longer exists.
     """
+    if sys.platform == "win32":
+        return _send_ipc_command("save")
     try:
         os.kill(pid, signal.SIGUSR1)
         return True
@@ -115,6 +143,8 @@ def send_reload_signal(pid: int) -> bool:
     Send SIGHUP to the daemon to reload config from disk and apply changes.
     Returns True on success, False if the process no longer exists.
     """
+    if sys.platform == "win32":
+        return _send_ipc_command("reload")
     try:
         os.kill(pid, signal.SIGHUP)
         return True

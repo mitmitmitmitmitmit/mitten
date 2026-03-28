@@ -13,11 +13,15 @@ import logging
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+
+# Null device differs between platforms
+_NULL = "NUL" if sys.platform == "win32" else "/dev/null"
 
 from .config import MittenConfig, TMP_DIR
 from . import notify as _notify

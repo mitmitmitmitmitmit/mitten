@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "terminal": {
+      "command": "/home/mlucas/.discord-mcp-venv/bin/python3",
+      "args": ["/home/mlucas/mcp-terminal/server.py"]
+    }
+  }
+}

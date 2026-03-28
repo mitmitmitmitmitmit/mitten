@@ -1,5 +1,6 @@
 """
-evdev-based mouse button detection — used by Settings "Detect..." button.
+evdev-based (Linux) / pynput-based (Windows) mouse button detection — used by
+Settings "Detect..." button.
 
 ButtonDetectWorker  — QThread that listens for the first button press
 ButtonDetectDialog  — Modal dialog wrapping the worker
@@ -7,7 +8,7 @@ ButtonDetectDialog  — Modal dialog wrapping the worker
 from __future__ import annotations
 
 import logging
-import select
+import sys
 import time
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -42,6 +43,74 @@ class ButtonDetectWorker(QThread):
 
     def run(self) -> None:
         log.debug("ButtonDetectWorker starting")
+        if sys.platform == "win32":
+            self._run_pynput()
+        else:
+            self._run_evdev()
+
+    def _run_pynput(self) -> None:
+        """Windows path: use pynput to detect the first mouse button press."""
+        import threading as _threading
+
+        # Reversed mapping: pynput Button → evdev-style integer code
+        _PYNPUT_TO_CODE: dict = {}
+        try:
+            from pynput.mouse import Button, Listener
+        except ImportError:
+            msg = "pynput not installed — run: pip install pynput"
+            log.error(msg)
+            self.error.emit(msg)
+            return
+
+        _PYNPUT_TO_CODE = {
+            Button.left:   272,
+            Button.right:  273,
+            Button.middle: 274,
+            Button.x1:     275,
+            Button.x2:     276,
+        }
+
+        try:
+            from ..config import BUTTON_NAMES
+            reverse = {v: k for k, v in BUTTON_NAMES.items()}
+        except Exception as e:
+            log.warning("Could not load BUTTON_NAMES: %s", e)
+            reverse = {}
+
+        detected_event = _threading.Event()
+
+        def _on_click(x, y, button, pressed):
+            if self._abort or not pressed:
+                return
+            code = _PYNPUT_TO_CODE.get(button)
+            if code is None:
+                return
+            name = reverse.get(code, f"BTN_{code}")
+            log.info("Detected button (pynput): code=%d name=%s", code, name)
+            self.detected.emit(code, name)
+            detected_event.set()
+            return False  # stop listener
+
+        self.status.emit("Listening for mouse button press…")
+        listener = Listener(on_click=_on_click)
+        listener.start()
+
+        deadline = time.monotonic() + 30.0
+        while not self._abort and not detected_event.is_set() and time.monotonic() < deadline:
+            time.sleep(0.1)
+
+        listener.stop()
+
+        if not self._abort and not detected_event.is_set():
+            log.warning("Button detect timed out after 30s")
+            self.error.emit("Timed out — no button press detected in 30s.")
+
+        log.debug("ButtonDetectWorker (pynput) done")
+
+    def _run_evdev(self) -> None:
+        """Linux path: use evdev + select to detect the first button press."""
+        import select
+
         try:
             from evdev import InputDevice, ecodes, list_devices
         except ImportError:
