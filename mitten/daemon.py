@@ -201,12 +201,12 @@ class MittenDaemon:
                     f"full recording: {path.name}",
                 )
                 # Run through watermark/compress pipeline like a normal clip
-                save.SaveWorker(
-                    path,
-                    self._config,
-                    on_success=lambda p: log.info("Session processed: %s", p),
+                save.process_clip(
+                    raw_path=path,
+                    config=self._config,
+                    on_success=lambda p, s: log.info("Session processed: %s (%ds)", p, s),
                     on_failure=lambda msg: log.error("Session post-process failed: %s", msg),
-                ).start()
+                )
             else:
                 notify.notify("~( x.x.^)>  session error", "recording was empty or lost")
         else:
