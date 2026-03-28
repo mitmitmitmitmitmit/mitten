@@ -4,7 +4,7 @@ a clipping tool that doesn't suck.
 
 keeps a rolling replay buffer on your gpu. press a button, the last N seconds are saved. no cloud, no account, nothing calling home. that's it.
 
-**linux only for now. specifically wayland, dont try to use this on x11 you retard** windows port is in progress. watch the repo.
+**linux only for now. specifically wayland, dont try to use this on x11 you retard.** windows port is in progress. watch the repo.
 
 ---
 
@@ -27,7 +27,7 @@ tdlr medal is shit brah
 - **session recording**: triple click to start, triple click to stop and save. same button, different gesture
 - **discord compression**: hits the 10mb free limit. compression done locally, your clip never leaves your machine. online tools fumble this. mitten doesn't
 - **vocal trigger** *(coming)*: auto clips laughs, jumpscares, hype moments. no button needed
-- **watermark**: burned in on save. fully customizable. one tiny "mitten" credit stays. it's a solo project, that's literally all it asks. fork it if you want, i'm not your dad
+- **watermark**: burned in on save. fully customizable. one tiny "mitten v{ver}" credit stays in the corner. it's a solo project, that's literally all it asks. fork it if you want, i'm not your dad
 - **auto update**: checks for updates on startup, backs up first, rolls back if something breaks
 - **gui**: tray app. clip browser, trim, settings, stats. not electron. i said what i said
 
@@ -45,7 +45,7 @@ clips live on your drive. nothing goes anywhere.
 
 mitten comes built in with discord presence support (no flatpak, use vesktop)
 
-mitten comes with animated watermarks, you can edit, a full dashboard with a built in clip viewer, and basic clip editor
+mitten comes with a full dashboard, built in clip viewer, and basic clip editor
 
 a full settings menu where you can tweak everything to your liking with no paywall for certain settings (tsk tsk tsk)
 
@@ -117,7 +117,7 @@ something breaks, open an issue. you fix it, open a pr. there are better odds of
 ## coming
 
 - vocal trigger: auto-clips laughs, screams, hype moments without pressing anything
-- discord rich presence + direct clip posting
+- direct clip posting to discord
 - windows port (i know, i know)
 - mitten.clips. soon. i mean it this time.
 
