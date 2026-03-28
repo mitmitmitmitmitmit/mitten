@@ -105,6 +105,7 @@ def _do_process(
     meta: dict,
 ) -> None:
     start_time = time.monotonic()
+    _preprocess_mic_audio(raw_path, config)
     if not raw_path.exists() or raw_path.stat().st_size == 0:
         msg = _efmt(E_SAVE_MISSING, f"Raw clip missing or empty: {raw_path.name}")
         log.warning(msg)
@@ -588,6 +589,101 @@ def _build_mitten_mark_cmd(
         "-movflags", "+faststart",
         str(output_path),
     ]
+
+
+def _preprocess_mic_audio(raw_path: Path, cfg: MittenConfig) -> bool:
+    """
+    If mic is configured, mix and process the two audio streams into one in-place.
+    Replaces raw_path with the processed version (video stream-copied, audio re-encoded).
+    Returns True if preprocessing happened (file was replaced), False otherwise.
+    """
+    mic = cfg.recorder.mic_device.split("|")[0] if cfg.recorder.mic_device else ""
+    if not mic:
+        return False
+
+    # Count audio streams in the file
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=index", "-of", "csv=p=0", str(raw_path)],
+            capture_output=True, text=True, timeout=10,
+        )
+        audio_count = len([l for l in probe.stdout.strip().splitlines() if l.strip()])
+    except Exception:
+        audio_count = 1
+
+    has_desktop = bool(cfg.recorder.audio_device) and audio_count >= 2
+    mic_is_second = has_desktop  # mic occupies a:1 when desktop is a:0
+
+    mic_vol = cfg.recorder.mic_volume
+    noise_red = cfg.recorder.mic_noise_reduction
+    ducking = cfg.recorder.mic_ducking
+    duck_reduction = max(0.01, min(1.0, cfg.recorder.mic_ducking_reduction))
+
+    filters: list[str] = []
+
+    if has_desktop:
+        desk_chain = "[0:a:0]"
+        mic_chain = "[0:a:1]"
+
+        if noise_red:
+            filters.append(f"{mic_chain}arnndn[mic_nr]")
+            mic_chain = "[mic_nr]"
+
+        if mic_vol != 1.0:
+            filters.append(f"{mic_chain}volume={mic_vol:.3f}[mic_v]")
+            mic_chain = "[mic_v]"
+
+        if ducking:
+            filters.append(f"{mic_chain}asplit=2[mic_mix][mic_sc]")
+            mic_chain = "[mic_mix]"
+            filters.append(
+                f"{desk_chain}[mic_sc]sidechaincompress="
+                f"threshold=-25dB:ratio=8:attack=10:release=300:"
+                f"makeup={duck_reduction:.3f}[desk_d]"
+            )
+            desk_chain = "[desk_d]"
+
+        filters.append(f"{desk_chain}{mic_chain}amix=inputs=2:normalize=0[aout]")
+    else:
+        # Only mic stream
+        mic_chain = "[0:a:0]"
+        if noise_red:
+            filters.append(f"{mic_chain}arnndn[mic_nr]")
+            mic_chain = "[mic_nr]"
+        if mic_vol != 1.0:
+            filters.append(f"{mic_chain}volume={mic_vol:.3f}[aout]")
+        else:
+            filters.append(f"{mic_chain}acopy[aout]")
+
+    fc = ";".join(filters)
+    tmp_path = raw_path.with_name(raw_path.stem + "_micproc" + raw_path.suffix)
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(raw_path),
+        "-filter_complex", fc,
+        "-map", "0:v:0",
+        "-map", "[aout]",
+        "-c:v", "copy",
+        "-c:a", "aac", "-b:a", "192k",
+        str(tmp_path),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=120)
+        if result.returncode == 0 and tmp_path.exists() and tmp_path.stat().st_size > 0:
+            raw_path.unlink(missing_ok=True)
+            tmp_path.rename(raw_path)
+            log.debug("Mic audio preprocessing complete: %s", raw_path.name)
+            return True
+        log.warning("Mic audio preprocessing failed (code %d): %s",
+                    result.returncode, result.stderr.decode(errors="replace")[-200:])
+        tmp_path.unlink(missing_ok=True)
+        return False
+    except Exception as e:
+        log.warning("Mic audio preprocessing error: %s", e)
+        tmp_path.unlink(missing_ok=True)
+        return False
 
 
 def _is_light_mode(config) -> bool:

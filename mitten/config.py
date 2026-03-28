@@ -54,6 +54,11 @@ class RecorderConfig:
     output_codec: str = "h264"    # codec for saved clips: h264 = Discord/browser compatible
     watermark_cq: int = 26        # NVENC constant quality: lower = better/larger, higher = smaller/worse
     audio_device: str = ""        # empty = no audio; use gpu-screen-recorder --list-audio-devices
+    mic_device: str = ""          # empty = no mic; use gpu-screen-recorder --list-audio-devices
+    mic_volume: float = 1.0       # 0.0–2.0 (1.0 = 100%)
+    mic_noise_reduction: bool = False
+    mic_ducking: bool = False     # lower desktop audio when mic is active
+    mic_ducking_reduction: float = 0.4  # desktop drops to this fraction when ducking (0.4 = 40%)
     auto_compress: bool = True    # re-encode clip to fit within compression_target_mb
     compression_target_mb: int = 10  # target file size for auto_compress
 
@@ -207,6 +212,11 @@ def load_config(config_path: Path | None = None) -> MittenConfig:
             output_codec=str(r.get("output_codec", "h264")),
             watermark_cq=int(r.get("watermark_cq", 26)),
             audio_device=str(r.get("audio_device", "")),
+            mic_device=str(r.get("mic_device", "")),
+            mic_volume=float(r.get("mic_volume", 1.0)),
+            mic_noise_reduction=bool(r.get("mic_noise_reduction", False)),
+            mic_ducking=bool(r.get("mic_ducking", False)),
+            mic_ducking_reduction=float(r.get("mic_ducking_reduction", 0.4)),
             auto_compress=bool(r.get("auto_compress", True)),
             compression_target_mb=int(r.get("compression_target_mb", 10)),
         ),

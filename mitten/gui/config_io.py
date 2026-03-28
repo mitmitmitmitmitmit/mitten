@@ -41,6 +41,11 @@ capture_codec = {_q(r.capture_codec)}
 output_codec = {_q(r.output_codec)}
 watermark_cq = {r.watermark_cq}
 audio_device = {_q(r.audio_device)}
+mic_device = {_q(r.mic_device)}
+mic_volume = {r.mic_volume}
+mic_noise_reduction = {_bool(r.mic_noise_reduction)}
+mic_ducking = {_bool(r.mic_ducking)}
+mic_ducking_reduction = {r.mic_ducking_reduction}
 auto_compress = {_bool(r.auto_compress)}
 compression_target_mb = {r.compression_target_mb}
 

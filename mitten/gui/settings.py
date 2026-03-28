@@ -1069,69 +1069,9 @@ class SettingsDialog(QWidget):
         cap_col.addWidget(cap_hint)
         form.addRow("Capture codec", cap_col)
 
-        form.addRow(_sep("AUDIO"))
-
-        self._audio_combo = QComboBox()
-        self._audio_combo.addItem("System default", "default")
-        self._audio_combo.addItem("(no audio)", "")
-        try:
-            import subprocess as _sp
-            _r = _sp.run(
-                ["gpu-screen-recorder", "--list-audio-devices"],
-                capture_output=True, text=True, timeout=5,
-            )
-            for _line in _r.stdout.splitlines():
-                _line = _line.strip()
-                if _line and _line not in ("default", ""):
-                    self._audio_combo.addItem(_line, _line)
-        except Exception:
-            pass
-        audio_col = QVBoxLayout()
-        audio_col.setSpacing(2)
-        audio_col.addWidget(self._audio_combo)
-        form.addRow("Desktop audio", audio_col)
-
-        mic_row = QHBoxLayout()
-        mic_row.setSpacing(8)
-        self._mic_enabled = QCheckBox("Capture microphone")
-        self._mic_enabled.setEnabled(False)
-        _mic_coming_text = "(coming soon)"
-        try:
-            from .themes import LIGHT_MODE_ACTIVE, get_abuse
-            import random as _r
-            if LIGHT_MODE_ACTIVE and _r.random() < 0.35:
-                _mic_coming_text = get_abuse()
-        except Exception:
-            pass
-        mic_coming = QLabel(_mic_coming_text)
-        mic_coming.setWordWrap(True)
-        mic_coming.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px;")
-        mic_row.addWidget(self._mic_enabled)
-        mic_row.addWidget(mic_coming)
-        mic_row.addStretch()
-        form.addRow("", mic_row)
-
-        self._mic_combo = QComboBox()
-        self._mic_combo.addItem("System default", "default")
-        self._mic_combo.addItem("(select mic)", "")
-        self._mic_combo.setEditable(True)
-        self._mic_combo.setEnabled(False)
-        form.addRow("Mic input", self._mic_combo)
-
-        return page
-
-    def _make_compression_tab(self) -> QWidget:
-        page, form = self._page_wrapper()
-
         self._out_codec_combo = QComboBox()
         self._out_codec_combo.addItems(["h264", "hevc", "h264+hevc", "av1"])
-        _out_hint_text = "h264 = Discord / browser compatible · h264+hevc = HEVC first pass then H.264 transcode (smaller, slower)"
-        try:
-            from .themes import LIGHT_MODE_ACTIVE, get_abuse
-            if LIGHT_MODE_ACTIVE and random.random() < 0.40:
-                _out_hint_text = get_abuse()
-        except Exception:
-            pass
+        _out_hint_text = "h264 = Discord compatible · hevc = smaller files · h264+hevc = HEVC pass then H.264 transcode"
         out_hint = QLabel(_out_hint_text)
         out_hint.setWordWrap(True)
         out_hint.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 10px;")
@@ -1140,6 +1080,96 @@ class SettingsDialog(QWidget):
         out_col.addWidget(self._out_codec_combo)
         out_col.addWidget(out_hint)
         form.addRow("Output codec", out_col)
+
+        form.addRow(_sep("AUDIO"))
+
+        # ── Desktop audio ──────────────────────────────────────────────
+        self._audio_combo = QComboBox()
+        self._audio_combo.addItem("System default", "default")
+        self._audio_combo.addItem("(no audio)", "")
+        try:
+            import subprocess as _sp
+            _gsr_devices = _sp.run(
+                ["gpu-screen-recorder", "--list-audio-devices"],
+                capture_output=True, text=True, timeout=5,
+            )
+            _gsr_lines = _gsr_devices.stdout.splitlines()
+            for _line in _gsr_lines:
+                _line = _line.strip()
+                if _line and _line not in ("default", ""):
+                    self._audio_combo.addItem(_line, _line)
+        except Exception:
+            _gsr_lines = []
+        audio_col = QVBoxLayout()
+        audio_col.setSpacing(2)
+        audio_col.addWidget(self._audio_combo)
+        form.addRow("Desktop audio", audio_col)
+
+        # ── Mic device ─────────────────────────────────────────────────
+        form.addRow(_sep("MIC"))
+
+        self._mic_combo = QComboBox()
+        self._mic_combo.setEditable(True)
+        self._mic_combo.addItem("(no mic)", "")
+        _input_prefixes = ("alsa_input.", "default_input", "bluez_input.")
+        try:
+            for _line in _gsr_lines:
+                _line = _line.strip()
+                _val = _line.split("|")[0]
+                if _val and any(_val.startswith(p) for p in _input_prefixes):
+                    self._mic_combo.addItem(_line, _line)
+        except Exception:
+            pass
+        self._mic_combo.currentIndexChanged.connect(self._toggle_mic_fields)
+        form.addRow("Mic device", self._mic_combo)
+
+        # Mic volume
+        mic_vol_row = QHBoxLayout()
+        mic_vol_row.setSpacing(8)
+        self._mic_vol_slider = QSlider(Qt.Orientation.Horizontal)
+        self._mic_vol_slider.setRange(0, 200)
+        self._mic_vol_slider.setValue(100)
+        self._mic_vol_label = QLabel("100%")
+        self._mic_vol_label.setFixedWidth(36)
+        self._mic_vol_slider.valueChanged.connect(
+            lambda v: self._mic_vol_label.setText(f"{v}%")
+        )
+        mic_vol_row.addWidget(self._mic_vol_slider, 1)
+        mic_vol_row.addWidget(self._mic_vol_label)
+        self._mic_vol_widget = QWidget()
+        self._mic_vol_widget.setLayout(mic_vol_row)
+        form.addRow("Mic volume", self._mic_vol_widget)
+
+        # Noise reduction
+        self._mic_noise_cb = QCheckBox("Reduce background noise")
+        form.addRow("", self._mic_noise_cb)
+
+        # Ducking
+        self._mic_duck_cb = QCheckBox("Lower game audio when speaking")
+        form.addRow("", self._mic_duck_cb)
+
+        duck_amt_row = QHBoxLayout()
+        duck_amt_row.setSpacing(8)
+        self._mic_duck_slider = QSlider(Qt.Orientation.Horizontal)
+        self._mic_duck_slider.setRange(0, 100)
+        self._mic_duck_slider.setValue(40)
+        self._mic_duck_label = QLabel("drops to 40%")
+        self._mic_duck_slider.valueChanged.connect(
+            lambda v: self._mic_duck_label.setText(f"drops to {v}%")
+        )
+        duck_amt_row.addWidget(self._mic_duck_slider, 1)
+        duck_amt_row.addWidget(self._mic_duck_label)
+        self._mic_duck_amt_widget = QWidget()
+        self._mic_duck_amt_widget.setLayout(duck_amt_row)
+        form.addRow("Duck amount", self._mic_duck_amt_widget)
+
+        self._mic_duck_cb.toggled.connect(self._mic_duck_amt_widget.setVisible)
+        self._toggle_mic_fields(self._mic_combo.currentIndex())
+
+        return page
+
+    def _make_compression_tab(self) -> QWidget:
+        page, form = self._page_wrapper()
 
         cq_row = QHBoxLayout()
         self._cq_slider = _CQSlider(Qt.Orientation.Horizontal)
@@ -1792,6 +1822,14 @@ class SettingsDialog(QWidget):
         for w in (self._notif_start, self._notif_save, self._notif_error):
             w.setEnabled(checked)
 
+    def _toggle_mic_fields(self, _index: int = 0) -> None:
+        has_mic = bool(self._mic_combo.currentData() or
+                       (self._mic_combo.currentText().strip() not in ("", "(no mic)")))
+        for w in (self._mic_vol_widget, self._mic_noise_cb, self._mic_duck_cb):
+            w.setEnabled(has_mic)
+        self._mic_duck_amt_widget.setEnabled(has_mic)
+        self._mic_duck_amt_widget.setVisible(has_mic and self._mic_duck_cb.isChecked())
+
     def _on_theme_changed(self, name: str) -> None:
         if name != "Light":
             return
@@ -1913,6 +1951,22 @@ class SettingsDialog(QWidget):
             self._audio_combo.setCurrentIndex(0)  # System default
         else:
             self._audio_combo.setCurrentIndex(1)  # (no audio)
+
+        # Mic
+        if r.mic_device:
+            idx = self._mic_combo.findData(r.mic_device)
+            if idx >= 0:
+                self._mic_combo.setCurrentIndex(idx)
+            else:
+                self._mic_combo.addItem(r.mic_device, r.mic_device)
+                self._mic_combo.setCurrentIndex(self._mic_combo.count() - 1)
+        else:
+            self._mic_combo.setCurrentIndex(0)  # (no mic)
+        self._mic_vol_slider.setValue(int(r.mic_volume * 100))
+        self._mic_noise_cb.setChecked(r.mic_noise_reduction)
+        self._mic_duck_cb.setChecked(r.mic_ducking)
+        self._mic_duck_slider.setValue(int(r.mic_ducking_reduction * 100))
+        self._toggle_mic_fields()
 
         try:
             from ..config import BUTTON_NAMES
@@ -2172,6 +2226,14 @@ class SettingsDialog(QWidget):
                 output_codec=self._out_codec_combo.currentText(),
                 watermark_cq=self._cq_spin.value(),
                 audio_device=audio_val,
+                mic_device=self._mic_combo.currentData() or (
+                    "" if self._mic_combo.currentText().strip() in ("", "(no mic)")
+                    else self._mic_combo.currentText().strip()
+                ),
+                mic_volume=self._mic_vol_slider.value() / 100.0,
+                mic_noise_reduction=self._mic_noise_cb.isChecked(),
+                mic_ducking=self._mic_duck_cb.isChecked(),
+                mic_ducking_reduction=self._mic_duck_slider.value() / 100.0,
                 auto_compress=self._auto_compress.isChecked(),
                 compression_target_mb=self._target_spin.value(),
             ),
