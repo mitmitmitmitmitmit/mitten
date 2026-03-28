@@ -1249,16 +1249,21 @@ class _AboutPage(QWidget):
         layout.addWidget(_gap(10))
 
         _changelog_entries = [
-            ("0.2.25",   "0000000", "about page polish, README cleanup, copy pass", False),
-            ("0.2.24",   "fac86b6", "discord rich presence, dead code cleanup", False),
-            ("0.2.23.1", "15fe242", "README rewrite, dialog title fix, ui text cleanup", True),
-            ("0.2.23",   "01a3ef5", "adaptive cat system, nav look-around, clips vibe cycle", False),
-            ("0.2.22",   "4169948", "triple-click session recording", False),
-            ("0.2.21",   "dd26855", "restart dialog fix", True),
-            ("0.2.20.9", "f9217ab", "adaptive cats, wink system, light mode crash fixes", True),
-            ("0.2.20.8", "8335970", "shame watermark, audio device dropdown, review slider", True),
-            ("0.2.19.1", "d11ea99", "light mode abuse sounds, hint label fixes", True),
-            ("0.2.19",   "00e622c", "dev mode, theme overhaul, sounds, CQ slider, dual codec", False),
+            ("0.3.4.2", "c5d6608", "README cleanup — remove animated watermarks, fix coming section", True),
+            ("0.3.4.1", "fbf09dd", "fix session recording save (SaveWorker → process_clip)", True),
+            ("0.3.4",   "149abd3", "remove intro animation, hardcode mitten version watermark", False),
+            ("0.3.3",   "759b9f3", "advanced clip editor — timeline, text/sfx/image overlays, ffmpeg export", False),
+            ("0.3.2.3", "739d50f", "physical trigger debounce 400ms", True),
+            ("0.3.2.2", "22332af", "save button debounce — prevent accidental double-trigger", True),
+            ("0.3.2.1", "00ede65", "revert lock — suppress updates until newer version releases", True),
+            ("0.3.2",   "d555c14", "discord presence — per-page toggles, custom messages, app triggers", False),
+            ("0.3.1.2", "4086726", "mode switch yes button now saves and reloads daemon immediately", True),
+            ("0.3.1",   "15c6e2c", "intro animation baked into clips — filter_complex MITTEN logo", False),
+            ("0.2.25",  "0000000", "about page polish, README cleanup, copy pass", False),
+            ("0.2.24",  "fac86b6", "discord rich presence, dead code cleanup", False),
+            ("0.2.23",  "01a3ef5", "adaptive cat system, nav look-around, clips vibe cycle", False),
+            ("0.2.22",  "4169948", "triple-click session recording", False),
+            ("0.2.19",  "00e622c", "dev mode, theme overhaul, sounds, CQ slider, dual codec", False),
         ]
         try:
             from . import themes as _themes_mod
