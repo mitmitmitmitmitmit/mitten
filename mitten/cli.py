@@ -13,6 +13,16 @@ import logging
 import sys
 from pathlib import Path
 
+# Suppress console windows for all subprocess calls on Windows (windowed exe)
+if sys.platform == "win32":
+    import subprocess as _subprocess
+    _orig_Popen_init = _subprocess.Popen.__init__
+    def _patched_Popen_init(self, args, **kwargs):
+        kwargs.setdefault("creationflags", 0)
+        kwargs["creationflags"] |= _subprocess.CREATE_NO_WINDOW
+        _orig_Popen_init(self, args, **kwargs)
+    _subprocess.Popen.__init__ = _patched_Popen_init
+
 from .config import DATA_DIR as _DATA_DIR
 _LOG_DIR = _DATA_DIR / "logs"
 _FMT = "%(asctime)s  %(levelname)-7s  %(name)s  %(message)s"
