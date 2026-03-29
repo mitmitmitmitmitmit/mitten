@@ -76,10 +76,28 @@ def get_daemon_pid() -> int | None:
 def toggle_daemon(pid: int | None = None) -> bool:
     """
     Start or stop the MITTEN recording daemon.
-    If `pid` is given (daemon is running) → stop via systemctl, fallback to SIGTERM.
-    If `pid` is None (daemon is not running) → start via systemctl.
+    If `pid` is given (daemon is running) → stop.
+    If `pid` is None (daemon is not running) → start.
     Returns True on success, False on failure.
     """
+    if sys.platform == "win32":
+        if pid is not None:
+            try:
+                import psutil
+                psutil.Process(pid).terminate()
+                return True
+            except Exception:
+                return False
+        else:
+            try:
+                subprocess.Popen(
+                    [sys.executable, "run"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                return True
+            except Exception:
+                return False
+
     if pid is not None:
         try:
             result = subprocess.run(
