@@ -1,5 +1,5 @@
 """
-Desktop notification transport via notify-send.
+Desktop notification transport via notify-send (Linux) or winotify (Windows).
 Single fire-and-forget notify() function — callers supply the message content.
 """
 from __future__ import annotations
@@ -25,12 +25,19 @@ def notify(
 ) -> None:
     """Send a desktop notification (non-blocking)."""
     if sys.platform == "win32":
-        try:
-            from winotify import Notification
-            toast = Notification(app_id="Mitten", title=summary, msg=body or "")
-            toast.show()
-        except Exception:
-            pass
+        def _win_notify() -> None:
+            try:
+                from winotify import Notification, audio  # type: ignore
+                toast = Notification(
+                    app_id=_APP_NAME,
+                    title=summary,
+                    msg=body,
+                    duration="short",
+                )
+                toast.show()
+            except Exception as e:
+                log.debug("winotify error: %s", e)
+        threading.Thread(target=_win_notify, daemon=True).start()
         return
 
     cmd = [
@@ -70,22 +77,6 @@ def notify_with_actions(
     clicks that action. Runs notify-send --wait in a background thread.
     Falls back to plain notify() if actions is None or empty.
     """
-    if sys.platform == "win32":
-        if not actions:
-            notify(summary, body, urgency, icon, timeout_ms)
-            return
-        try:
-            from winotify import Notification
-            toast = Notification(app_id="Mitten", title=summary, msg=body or "")
-            # Map first two actions to winotify buttons
-            action_items = list(actions.items())
-            for _action_id, (label, callback) in action_items[:2]:
-                toast.add_actions(label=label, launch=label)
-            toast.show()
-        except Exception:
-            notify(summary, body, urgency, icon, timeout_ms)
-        return
-
     if not actions:
         notify(summary, body, urgency, icon, timeout_ms)
         return

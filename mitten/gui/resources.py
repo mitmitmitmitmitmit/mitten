@@ -37,6 +37,7 @@ class C:
     BLUE        = "#89b4fa"
     GRAY        = "#585b70"
     PINK        = "#f38ba8"
+    MAUVE       = "#cba6f7"
     DARK_ACCENT = "#b497d7"
 
 

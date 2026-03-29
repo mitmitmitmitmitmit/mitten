@@ -6,6 +6,7 @@ Public API: switch_section(idx: int)
 from __future__ import annotations
 
 import random
+import sys
 from pathlib import Path
 
 from PyQt6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QTimer, Qt, pyqtSignal
@@ -2106,9 +2107,21 @@ class SettingsDialog(QWidget):
 
     def _restart_gui(self) -> None:
         """Save is done — relaunch the GUI process and close this one."""
-        import sys
         import subprocess
         from PyQt6.QtWidgets import QApplication
+        if sys.platform == "win32" and getattr(sys, "frozen", False):
+            import os, tempfile
+            bat = tempfile.NamedTemporaryFile(suffix=".bat", delete=False, mode="w")
+            bat.write(
+                f'@echo off\ntimeout /t 1 /nobreak >nul\nstart "" "{sys.executable}"\ndel "%~f0"\n'
+            )
+            bat.close()
+            subprocess.Popen(
+                ["cmd.exe", "/c", bat.name],
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
+            )
+            QApplication.instance().quit()
+            return
         try:
             subprocess.Popen([sys.executable, "-m", "mitten"] + sys.argv[1:])
         except Exception:

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import random
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -1802,8 +1803,12 @@ class _DebugPage(QWidget):
 
     def _open_config(self) -> None:
         from ..config import CONFIG_FILE
-        subprocess.Popen(["xdg-open", str(CONFIG_FILE)],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if sys.platform == "win32":
+            import os as _os_open
+            _os_open.startfile(str(CONFIG_FILE))
+        else:
+            subprocess.Popen(["xdg-open", str(CONFIG_FILE)],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def _open_clips(self) -> None:
         try:
@@ -1812,8 +1817,12 @@ class _DebugPage(QWidget):
         except Exception:
             clips_dir = Path.home() / "Videos" / "mitten"
         clips_dir.mkdir(parents=True, exist_ok=True)
-        subprocess.Popen(["xdg-open", str(clips_dir)],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if sys.platform == "win32":
+            subprocess.Popen(["explorer", str(clips_dir)],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            subprocess.Popen(["xdg-open", str(clips_dir)],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def _reload_theme(self) -> None:
         try:
@@ -1849,24 +1858,40 @@ class _DebugPage(QWidget):
             lines.append("gpu       (nvidia-smi not available)")
 
         try:
-            for line in Path("/proc/cpuinfo").read_text().splitlines():
-                if "model name" in line:
-                    cpu = line.split(":", 1)[1].strip()
+            if sys.platform == "win32":
+                import platform as _platform
+                cpu = _platform.processor()
+                if cpu:
                     lines.append(f"cpu       {cpu}")
-                    break
+                else:
+                    lines.append("cpu       (unavailable)")
+            else:
+                for line in Path("/proc/cpuinfo").read_text().splitlines():
+                    if "model name" in line:
+                        cpu = line.split(":", 1)[1].strip()
+                        lines.append(f"cpu       {cpu}")
+                        break
         except Exception:
             lines.append("cpu       (unavailable)")
 
         try:
-            for line in Path("/proc/meminfo").read_text().splitlines():
-                if line.startswith("MemTotal:"):
-                    ram_kb = int(line.split()[1])
-                    lines.append(f"ram       {ram_kb // (1024 * 1024)} GB total")
-                    break
+            if sys.platform == "win32":
+                import psutil as _psutil
+                total_gb = _psutil.virtual_memory().total // (1024 ** 3)
+                lines.append(f"ram       {total_gb} GB total")
+            else:
+                for line in Path("/proc/meminfo").read_text().splitlines():
+                    if line.startswith("MemTotal:"):
+                        ram_kb = int(line.split()[1])
+                        lines.append(f"ram       {ram_kb // (1024 * 1024)} GB total")
+                        break
         except Exception:
             lines.append("ram       (unavailable)")
 
-        display = _os.environ.get("WAYLAND_DISPLAY") or _os.environ.get("DISPLAY") or "unknown"
+        if sys.platform == "win32":
+            display = "Windows"
+        else:
+            display = _os.environ.get("WAYLAND_DISPLAY") or _os.environ.get("DISPLAY") or "unknown"
         lines.append(f"display   {display}")
 
         try:
@@ -3014,6 +3039,12 @@ class MittenMainWindow(QMainWindow):
         except Exception:
             pass
 
-        self.hide()
-        event.ignore()
+        from PyQt6.QtWidgets import QSystemTrayIcon
+        if sys.platform != "win32" or QSystemTrayIcon.isSystemTrayAvailable():
+            self.hide()
+            event.ignore()
+        else:
+            # No system tray on this platform — actually quit so the window close button works.
+            event.accept()
+            QApplication.instance().quit()
 
