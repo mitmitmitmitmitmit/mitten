@@ -1959,7 +1959,11 @@ class SettingsDialog(QWidget):
         self._buffer_slider.setValue(g.buffer_seconds)
         self._buffer_spin.setValue(g.buffer_seconds)
         self._fps_combo.setCurrentText(str(g.framerate))
-        self._monitor_combo.setCurrentText(str(g.monitor))
+        _mon_idx = self._monitor_combo.findData(str(g.monitor))
+        if _mon_idx >= 0:
+            self._monitor_combo.setCurrentIndex(_mon_idx)
+        else:
+            self._monitor_combo.setCurrentText(str(g.monitor))
         home = str(Path.home())
         sd = str(g.save_dir)
         self._save_dir_edit.setText(sd.replace(home, "~") if sd.startswith(home) else sd)
@@ -2281,7 +2285,7 @@ class SettingsDialog(QWidget):
                 buffer_seconds=self._buffer_spin.value(),
                 framerate=int(self._fps_combo.currentText()),
                 save_dir=save_dir,
-                monitor=self._monitor_combo.currentText(),
+                monitor=self._monitor_combo.currentData() or self._monitor_combo.currentText(),
                 theme=self._theme_combo.currentText(),
                 developer_mode=self._dev_mode_cb.isChecked(),
             ),
