@@ -2079,15 +2079,26 @@ class SettingsDialog(QWidget):
 
     def _revert_to_defaults(self) -> None:
         """Load default config values into the UI (does not save — user must still click Save)."""
-        reply = QMessageBox.question(
-            self, "Revert to defaults",
-            "Reset all settings to defaults?\n\nThis won't save until you click Save settings.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        from PyQt6.QtWidgets import QMessageBox, QPushButton
+        from .resources import C
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Revert to defaults")
+        msg.setText("Reset all settings to defaults?\n\nThis won't save until you click Save settings.")
+        msg.setIcon(QMessageBox.Icon.Question)
+        yes_btn = msg.addButton("Yes", QMessageBox.ButtonRole.AcceptRole)
+        cancel_btn = msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        _btn_style = (
+            "QPushButton { background: #45475a; color: #cdd6f4; border: none;"
+            "border-radius: 6px; padding: 7px 16px; font-weight: 600; }"
+            "QPushButton:hover { background: #585b70; }"
         )
-        if reply != QMessageBox.StandardButton.Yes:
+        yes_btn.setStyleSheet(_btn_style)
+        cancel_btn.setStyleSheet(_btn_style)
+        msg.exec()
+        if msg.clickedButton() != yes_btn:
             return
-        from ..config import MittenConfig
-        default = MittenConfig()
+        from ..config import load_config, DEFAULT_CONFIG_SRC
+        default = load_config(DEFAULT_CONFIG_SRC)
         self._load_config(default)
         self._save_status.setText("defaults loaded — click Save to apply")
         from PyQt6.QtCore import QTimer

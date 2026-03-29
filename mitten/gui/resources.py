@@ -225,7 +225,7 @@ QLabel[class="cat-header"] {{
 }}
 
 /* ── Buttons ── */
-QPushButton {{
+QPushButton, QMessageBox QPushButton {{
     background-color: {C.LAVENDER};
     color: {C.BG};
     border: none;
@@ -234,10 +234,10 @@ QPushButton {{
     font-weight: bold;
     font-size: 12px;
 }}
-QPushButton:hover {{
+QPushButton:hover, QMessageBox QPushButton:hover {{
     background-color: {ah};
 }}
-QPushButton:pressed {{
+QPushButton:pressed, QMessageBox QPushButton:pressed {{
     background-color: {C.DARK_ACCENT};
 }}
 QPushButton:disabled {{
