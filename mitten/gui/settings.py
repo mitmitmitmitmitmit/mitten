@@ -912,6 +912,14 @@ class SettingsDialog(QWidget):
         self._monitor_combo = QComboBox()
         self._monitor_combo.addItems(["auto"])
         self._monitor_combo.setEditable(True)
+        if sys.platform == "win32":
+            try:
+                from screeninfo import get_monitors as _get_monitors
+                for _mi, _mon in enumerate(_get_monitors()):
+                    _label = f"{_mon.name or f'Display {_mi + 1}'} ({_mon.width}×{_mon.height})"
+                    self._monitor_combo.addItem(_label, _mon.name or "auto")
+            except Exception:
+                pass
         form.addRow("Monitor", self._monitor_combo)
 
         dir_row = QHBoxLayout()
@@ -1088,19 +1096,44 @@ class SettingsDialog(QWidget):
         self._audio_combo = QComboBox()
         self._audio_combo.addItem("System default", "default")
         self._audio_combo.addItem("(no audio)", "")
-        try:
-            import subprocess as _sp
-            _gsr_devices = _sp.run(
-                ["gpu-screen-recorder", "--list-audio-devices"],
-                capture_output=True, text=True, timeout=5,
-            )
-            _gsr_lines = _gsr_devices.stdout.splitlines()
-            for _line in _gsr_lines:
-                _line = _line.strip()
-                if _line and _line not in ("default", ""):
-                    self._audio_combo.addItem(_line, _line)
-        except Exception:
-            _gsr_lines = []
+
+        import subprocess as _sp, re as _re
+        _win_audio_devs: list[str] = []
+        if sys.platform == "win32":
+            # Enumerate DirectShow audio devices via ffmpeg
+            try:
+                _dshow = _sp.run(
+                    ["ffmpeg", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
+                    capture_output=True, text=True, timeout=5, stdin=_sp.DEVNULL,
+                )
+                _in_audio = False
+                for _ln in _dshow.stderr.splitlines():
+                    if "audio devices" in _ln.lower():
+                        _in_audio = True
+                        continue
+                    if _in_audio:
+                        _m = _re.search(r'"(.+?)"', _ln)
+                        if _m:
+                            _dev = _m.group(1)
+                            _win_audio_devs.append(_dev)
+                            self._audio_combo.addItem(_dev, _dev)
+            except Exception:
+                pass
+        else:
+            _gsr_lines: list[str] = []
+            try:
+                _gsr_out = _sp.run(
+                    ["gpu-screen-recorder", "--list-audio-devices"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                _gsr_lines = _gsr_out.stdout.splitlines()
+                for _line in _gsr_lines:
+                    _line = _line.strip()
+                    if _line and _line not in ("default", ""):
+                        self._audio_combo.addItem(_line, _line)
+            except Exception:
+                pass
+
         audio_col = QVBoxLayout()
         audio_col.setSpacing(2)
         audio_col.addWidget(self._audio_combo)
@@ -1111,15 +1144,20 @@ class SettingsDialog(QWidget):
 
         self._mic_combo = QComboBox()
         self._mic_combo.addItem("(no mic)", "")
-        _input_prefixes = ("alsa_input.", "default_input", "bluez_input.")
-        try:
-            for _line in _gsr_lines:
-                _line = _line.strip()
-                _val = _line.split("|")[0]
-                if _val and any(_val.startswith(p) for p in _input_prefixes):
-                    self._mic_combo.addItem(_line, _line)
-        except Exception:
-            pass
+        if sys.platform == "win32":
+            for _dev in _win_audio_devs:
+                if any(k in _dev.lower() for k in ("mic", "input", "capture", "headset")):
+                    self._mic_combo.addItem(_dev, _dev)
+        else:
+            _input_prefixes = ("alsa_input.", "default_input", "bluez_input.")
+            try:
+                for _line in _gsr_lines:
+                    _line = _line.strip()
+                    _val = _line.split("|")[0]
+                    if _val and any(_val.startswith(p) for p in _input_prefixes):
+                        self._mic_combo.addItem(_line, _line)
+            except Exception:
+                pass
         self._mic_combo.currentIndexChanged.connect(self._toggle_mic_fields)
         form.addRow("Mic device", self._mic_combo)
 

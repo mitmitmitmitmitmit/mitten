@@ -346,13 +346,22 @@ class SessionRecorder:
             return None
 
 
-# ── Windows OBS WebSocket recorder ───────────────────────────────────────────
+# ── Windows ffmpeg gdigrab recorder ──────────────────────────────────────────
+# Segment-based rolling buffer. ffmpeg captures the desktop via GDI and writes
+# short .ts segments to TMP_DIR. On trigger, recent segments are concatenated
+# into a .mp4 that ClipWatcher picks up for post-processing. No OBS required.
+
+_WIN_SEG_SECS = 5        # each rolling segment is ~5 seconds
+_WIN_CODECS = [          # tried in order; first that survives >5s is kept
+    "h264_nvenc",
+    "libx264 -preset ultrafast",
+]
 
 if sys.platform == "win32":
-    class ObsRecorder:
+    class FfmpegWindowsRecorder:
         """
-        Windows recorder backend: controls OBS via WebSocket (obsws-python).
-        Uses OBS's built-in replay buffer instead of gpu-screen-recorder.
+        Windows recorder backend: ffmpeg gdigrab → rolling .ts segments.
+        Mirrors GpuRecorder's interface so the daemon works unchanged.
         """
 
         def __init__(
@@ -360,66 +369,188 @@ if sys.platform == "win32":
             config: MittenConfig,
             on_crash: Callable[[str], None] | None = None,
         ) -> None:
-            self.config = config
-            self.on_crash = on_crash
-            self._client = None
+            self._config = config
+            self._on_crash = on_crash
+            self._proc: subprocess.Popen | None = None
             self._running = False
+            self._lock = threading.Lock()
+            self._shutdown = threading.Event()
+            self._codec_idx = 0
+            self._start_time = 0.0
+
+        def _build_command(self, codec: str) -> list[str]:
+            cfg = self._config
+            r = cfg.recorder
+            num_segs = max(4, cfg.general.buffer_seconds // _WIN_SEG_SECS + 3)
+            seg_pattern = str(TMP_DIR / "winseg_%03d.ts")
+
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "gdigrab",
+                "-framerate", str(cfg.general.framerate),
+                "-i", "desktop",
+            ]
+
+            # Audio: "default" → WASAPI loopback; named device → dshow
+            audio_raw = r.audio_device.split("|")[0].strip() if r.audio_device else ""
+            if audio_raw == "default":
+                cmd += ["-f", "wasapi", "-loopback", "1", "-i", ""]
+            elif audio_raw:
+                cmd += ["-f", "dshow", "-i", f"audio={audio_raw}"]
+
+            cmd += ["-c:v"] + codec.split()
+
+            if audio_raw:
+                cmd += ["-c:a", "aac", "-b:a", "128k"]
+            else:
+                cmd += ["-an"]
+
+            cmd += [
+                "-f", "segment",
+                "-segment_time", str(_WIN_SEG_SECS),
+                "-segment_wrap", str(num_segs),
+                "-reset_timestamps", "1",
+                seg_pattern,
+            ]
+            return cmd
 
         def start(self, target: str = "auto") -> None:
+            with self._lock:
+                if self._proc and self._proc.poll() is None:
+                    log.debug("Windows recorder already running")
+                    return
+                self._shutdown.clear()
+                self._codec_idx = 0
+                for f in TMP_DIR.glob("winseg_*.ts"):
+                    try:
+                        f.unlink()
+                    except OSError:
+                        pass
+            self._launch(0)
+
+        def _launch(self, codec_idx: int) -> None:
+            codec = _WIN_CODECS[codec_idx]
+            cmd = self._build_command(codec)
+            log.info("Starting Windows recorder (codec=%s)", codec.split()[0])
             try:
-                import obsws_python as obs
-                self._client = obs.ReqClient(
-                    host="localhost", port=4455, password="", timeout=3
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
                 )
-                self._client.start_replay_buffer()
+                self._proc = proc
                 self._running = True
-                log.info("OBS replay buffer started")
+                self._start_time = time.time()
+                threading.Thread(
+                    target=self._watch, args=(proc, codec_idx),
+                    name="win-recorder-watcher", daemon=True,
+                ).start()
             except Exception as e:
-                log.error("ObsRecorder start failed: %s", e)
-                if self.on_crash:
-                    self.on_crash(str(e))
+                log.error("Failed to start ffmpeg recorder: %s", e)
+                self._running = False
+                if self._on_crash:
+                    self._on_crash(str(e))
+
+        def _watch(self, proc: subprocess.Popen, codec_idx: int) -> None:
+            proc.wait()
+            if self._shutdown.is_set():
+                return
+            elapsed = time.time() - self._start_time
+            # Quick exit likely means codec not supported — try fallback
+            if elapsed < 5.0 and codec_idx + 1 < len(_WIN_CODECS):
+                log.warning(
+                    "Codec %s failed (%.1fs), trying %s",
+                    _WIN_CODECS[codec_idx].split()[0], elapsed,
+                    _WIN_CODECS[codec_idx + 1].split()[0],
+                )
+                self._launch(codec_idx + 1)
+            else:
+                self._running = False
+                log.error("ffmpeg recorder exited after %.1fs", elapsed)
+                if self._on_crash:
+                    self._on_crash("ffmpeg recorder exited unexpectedly")
 
         def stop(self) -> None:
-            if self._client:
-                try:
-                    self._client.stop_replay_buffer()
-                except Exception:
-                    pass
+            self._shutdown.set()
+            with self._lock:
+                if self._proc:
+                    try:
+                        self._proc.terminate()
+                        self._proc.wait(timeout=5)
+                    except Exception:
+                        try:
+                            self._proc.kill()
+                        except Exception:
+                            pass
+                    self._proc = None
             self._running = False
-            self._client = None
 
         def restart(self, target: str | None = None) -> None:
             self.stop()
-            self.start(target=target or "auto")
+            time.sleep(0.5)
+            self.start()
 
         def save_replay(self) -> bool:
-            if self._client:
-                try:
-                    self._client.save_replay_buffer()
-                    log.info("OBS replay buffer save requested")
-                    return True
-                except Exception as e:
-                    log.error("ObsRecorder save_replay failed: %s", e)
-                    if self.on_crash:
-                        self.on_crash(str(e))
-            return False
+            """Kick off segment concat in background; returns True if started."""
+            segs = sorted(TMP_DIR.glob("winseg_*.ts"), key=lambda f: f.stat().st_mtime)
+            if not segs:
+                log.warning("No segments for replay save")
+                return False
+            threading.Thread(
+                target=self._do_concat, args=(list(segs),),
+                name="win-concat", daemon=True,
+            ).start()
+            return True
+
+        def _do_concat(self, segs: list) -> None:
+            complete = segs[:-1] if len(segs) > 1 else segs
+            needed = max(1, -(-self._config.general.buffer_seconds // _WIN_SEG_SECS))
+            to_use = complete[-needed:]
+            if not to_use:
+                log.warning("No complete segments to concat")
+                return
+            from datetime import datetime
+            ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            out_path = TMP_DIR / f"replay_{ts}.mp4"
+            list_path = TMP_DIR / "_winseg_list.txt"
+            try:
+                list_path.write_text(
+                    "\n".join(f"file '{p.as_posix()}'" for p in to_use),
+                    encoding="utf-8",
+                )
+                result = subprocess.run(
+                    ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                     "-i", str(list_path), "-c", "copy", str(out_path)],
+                    capture_output=True, timeout=60, stdin=subprocess.DEVNULL,
+                )
+                if result.returncode == 0 and out_path.exists() and out_path.stat().st_size > 0:
+                    log.info("Replay saved: %s", out_path)
+                else:
+                    log.error(
+                        "ffmpeg concat failed (rc=%d): %s",
+                        result.returncode,
+                        result.stderr.decode(errors="replace")[-300:],
+                    )
+            except Exception as e:
+                log.error("save_replay concat error: %s", e)
 
         def is_running(self) -> bool:
-            return self._running
+            return self._running and self._proc is not None and self._proc.poll() is None
 
         def build_command(self, target: str | None = None) -> list[str]:
-            return ["obs", "--replay-buffer"]
+            return self._build_command(_WIN_CODECS[self._codec_idx])
 
         @property
-        def pid(self) -> None:
-            return None
+        def pid(self) -> int | None:
+            return self._proc.pid if self._proc else None
 
 
 def make_recorder(
     config: MittenConfig,
     on_crash: Callable[[str], None] | None = None,
 ):
-    """Factory: returns ObsRecorder on Windows, GpuRecorder on Linux."""
+    """Factory: returns FfmpegWindowsRecorder on Windows, GpuRecorder on Linux."""
     if sys.platform == "win32":
-        return ObsRecorder(config, on_crash)
+        return FfmpegWindowsRecorder(config, on_crash)
     return GpuRecorder(config, on_crash)
