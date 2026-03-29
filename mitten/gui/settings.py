@@ -2151,17 +2151,9 @@ class SettingsDialog(QWidget):
         """Save is done — relaunch the GUI process and close this one."""
         import subprocess
         from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QProcess
         if sys.platform == "win32" and getattr(sys, "frozen", False):
-            import os, tempfile
-            bat = tempfile.NamedTemporaryFile(suffix=".bat", delete=False, mode="w")
-            bat.write(
-                f'@echo off\ntimeout /t 1 /nobreak >nul\nstart "" "{sys.executable}"\ndel "%~f0"\n'
-            )
-            bat.close()
-            subprocess.Popen(
-                ["cmd.exe", "/c", bat.name],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
-            )
+            QProcess.startDetached(sys.executable, [])
             QApplication.instance().quit()
             return
         try:

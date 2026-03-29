@@ -137,8 +137,8 @@ class _StatusBanner(QFrame):
         ),
         "no_deps": (
             "~( x.x.^)>",
-            "gpu-screen-recorder not found",
-            "install it: yay -S gpu-screen-recorder",
+            "ffmpeg not found" if sys.platform == "win32" else "gpu-screen-recorder not found",
+            "install it: winget install Gyan.FFmpeg" if sys.platform == "win32" else "install it: yay -S gpu-screen-recorder",
             C.PINK,
         ),
     }
@@ -1979,7 +1979,11 @@ class MittenMainWindow(QMainWindow):
 
         try:
             from .system_setup import check_dependencies
-            self._has_gsr = check_dependencies().get("gpu-screen-recorder", False)
+            deps = check_dependencies()
+            if sys.platform == "win32":
+                self._has_gsr = deps.get("ffmpeg", False)
+            else:
+                self._has_gsr = deps.get("gpu-screen-recorder", False)
         except Exception:
             self._has_gsr = True  # assume present if check fails
 
@@ -2186,6 +2190,17 @@ class MittenMainWindow(QMainWindow):
         self._sidebar_layout.addWidget(self._ver_label)
         self._sidebar_layout.addWidget(self._ver_update_widget)
         self._sidebar_layout.addWidget(made_label)
+
+        if sys.platform == "win32":
+            from PyQt6.QtWidgets import QPushButton, QApplication
+            _quit_btn = QPushButton("Quit")
+            _quit_btn.setStyleSheet(
+                f"QPushButton {{ background-color: transparent; color: {_hex_rgba(C.SUBTEXT, 0.5)};"
+                f"border: none; font-size: 10px; padding: 4px 0 6px 0; }}"
+                f"QPushButton:hover {{ color: {C.RED}; }}"
+            )
+            _quit_btn.clicked.connect(QApplication.instance().quit)
+            self._sidebar_layout.addWidget(_quit_btn)
 
         root.addWidget(sidebar)
 
