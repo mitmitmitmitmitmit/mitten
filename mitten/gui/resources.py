@@ -37,6 +37,7 @@ class C:
     BLUE        = "#89b4fa"
     GRAY        = "#585b70"
     PINK        = "#f38ba8"
+    MAUVE       = "#cba6f7"
     DARK_ACCENT = "#b497d7"
 
 
@@ -225,7 +226,7 @@ QLabel[class="cat-header"] {{
 }}
 
 /* ── Buttons ── */
-QPushButton {{
+QPushButton, QMessageBox QPushButton {{
     background-color: {C.LAVENDER};
     color: {C.BG};
     border: none;
@@ -234,13 +235,13 @@ QPushButton {{
     font-weight: bold;
     font-size: 12px;
 }}
-QPushButton:hover {{
+QPushButton:hover, QMessageBox QPushButton:hover {{
     background-color: {ah};
 }}
-QPushButton:pressed {{
+QPushButton:pressed, QMessageBox QPushButton:pressed {{
     background-color: {C.DARK_ACCENT};
 }}
-QPushButton:disabled {{
+QPushButton:disabled, QMessageBox QPushButton:disabled {{
     background-color: {C.OVERLAY};
     color: {C.GRAY};
 }}

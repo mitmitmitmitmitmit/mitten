@@ -2079,15 +2079,40 @@ class SettingsDialog(QWidget):
 
     def _revert_to_defaults(self) -> None:
         """Load default config values into the UI (does not save — user must still click Save)."""
-        reply = QMessageBox.question(
-            self, "Revert to defaults",
-            "Reset all settings to defaults?\n\nThis won't save until you click Save settings.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        from .resources import C, _hex_rgba
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Revert to defaults")
+        dlg.setMinimumWidth(360)
+        lay = QVBoxLayout(dlg)
+        lay.setSpacing(16)
+        lay.setContentsMargins(24, 20, 24, 20)
+        lbl = QLabel("Reset all settings to defaults?\n\nThis won't save until you click Save settings.")
+        lbl.setWordWrap(True)
+        lay.addWidget(lbl)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setStyleSheet(
+            f"QPushButton {{ background: {C.SURFACE}; color: {C.TEXT}; border: 1px solid {C.BORDER};"
+            f" border-radius: 6px; padding: 7px 18px; font-weight: bold; }}"
+            f"QPushButton:hover {{ border-color: {C.LAVENDER}; color: {C.LAVENDER}; }}"
         )
-        if reply != QMessageBox.StandardButton.Yes:
+        btn_cancel.clicked.connect(dlg.reject)
+        btn_yes = QPushButton("Reset to defaults")
+        btn_yes.setStyleSheet(
+            f"QPushButton {{ background: {C.LAVENDER}; color: {C.BG}; border: none;"
+            f" border-radius: 6px; padding: 7px 18px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: {C.DARK_ACCENT}; }}"
+        )
+        btn_yes.clicked.connect(dlg.accept)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_yes)
+        lay.addLayout(btn_row)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        from ..config import MittenConfig
-        default = MittenConfig()
+        from ..config import load_config, DEFAULT_CONFIG_SRC
+        default = load_config(DEFAULT_CONFIG_SRC)
         self._load_config(default)
         self._save_status.setText("defaults loaded — click Save to apply")
         from PyQt6.QtCore import QTimer

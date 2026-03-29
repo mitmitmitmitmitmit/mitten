@@ -1802,6 +1802,7 @@ class _DebugPage(QWidget):
 
     def _open_config(self) -> None:
         from ..config import CONFIG_FILE
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         subprocess.Popen(["xdg-open", str(CONFIG_FILE)],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
