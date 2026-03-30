@@ -1145,8 +1145,22 @@ class SettingsDialog(QWidget):
                     pass
                 return devs
 
-            _win_audio_out = _enum_wasapi("Render")
-            _win_audio_in = _enum_wasapi("Capture")
+            def _dedupe_names(names: list[str]) -> list[str]:
+                """Number duplicate device names so they're distinguishable."""
+                from collections import Counter
+                counts = Counter(names)
+                seen: dict[str, int] = {}
+                result = []
+                for n in names:
+                    if counts[n] > 1:
+                        seen[n] = seen.get(n, 0) + 1
+                        result.append(f"{n} ({seen[n]})")
+                    else:
+                        result.append(n)
+                return result
+
+            _win_audio_out = _dedupe_names(_enum_wasapi("Render"))
+            _win_audio_in = _dedupe_names(_enum_wasapi("Capture"))
             for _dev in _win_audio_out:
                 self._audio_combo.addItem(_dev, _dev)
         else:
