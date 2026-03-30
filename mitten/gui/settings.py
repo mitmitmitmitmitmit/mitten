@@ -2287,7 +2287,7 @@ class SettingsDialog(QWidget):
         from .config_io import save_config
 
         btn_label_text = self._trigger_btn_label.text()
-        btn_name = btn_label_text.split("  (")[0].strip() if "  (" in btn_label_text else "BTN_EXTRA"
+        btn_name = btn_label_text.split("  (")[0].strip() if "  (" in btn_label_text else btn_label_text.strip() or "BTN_EXTRA"
 
         audio_data = self._audio_combo.currentData()
         if audio_data is not None:
