@@ -73,7 +73,7 @@ class DiscordPresence:
         presence.clear()
     """
 
-    _RECONNECT_DELAY = 15.0   # seconds between reconnect attempts
+    _RECONNECT_DELAY = 5.0    # seconds between reconnect attempts
     _SEND_TIMEOUT   = 5.0     # socket send/recv timeout
 
     def __init__(self) -> None:
