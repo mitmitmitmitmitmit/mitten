@@ -563,6 +563,7 @@ class MittenDaemon:
 
         old_mode = self._config.general.mode
         new_mode = new_cfg.general.mode
+        old_cfg = self._config
         self._config = new_cfg
 
         if old_mode == "game" and new_mode != "game":
@@ -591,7 +592,7 @@ class MittenDaemon:
                 log.info("Config reload: game mode active, detector started")
 
         else:
-            if self._recorder.is_running() and _recorder_settings_changed(self._config, new_cfg):
+            if self._recorder.is_running() and _recorder_settings_changed(old_cfg, new_cfg):
                 self._recorder.restart()
                 log.info("Config reload: recorder settings changed, restarted")
             else:
