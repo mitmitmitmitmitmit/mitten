@@ -378,7 +378,7 @@ if sys.platform == "win32":
             self._codec_idx = 0
             self._start_time = 0.0
 
-        def _build_command(self, codec: str) -> list[str]:
+        def _build_command(self, codec: str, use_audio: bool = True) -> list[str]:
             cfg = self._config
             r = cfg.recorder
             num_segs = max(4, cfg.general.buffer_seconds // _WIN_SEG_SECS + 3)
@@ -393,14 +393,14 @@ if sys.platform == "win32":
 
             # Audio: WASAPI loopback for all desktop audio
             audio_raw = r.audio_device.split("|")[0].strip() if r.audio_device else ""
-            if audio_raw == "default":
+            if use_audio and audio_raw == "default":
                 cmd += ["-f", "wasapi", "-loopback", "1", "-i", "default"]
-            elif audio_raw:
+            elif use_audio and audio_raw:
                 cmd += ["-f", "wasapi", "-loopback", "1", "-i", audio_raw]
 
             cmd += ["-c:v"] + codec.split()
 
-            if audio_raw:
+            if use_audio and audio_raw:
                 cmd += ["-c:a", "aac", "-b:a", "128k"]
             else:
                 cmd += ["-an"]
@@ -428,10 +428,10 @@ if sys.platform == "win32":
                         pass
             self._launch(0)
 
-        def _launch(self, codec_idx: int) -> None:
+        def _launch(self, codec_idx: int, use_audio: bool = True) -> None:
             codec = _WIN_CODECS[codec_idx]
-            cmd = self._build_command(codec)
-            log.info("Starting Windows recorder (codec=%s)", codec.split()[0])
+            cmd = self._build_command(codec, use_audio)
+            log.info("Starting Windows recorder (codec=%s, audio=%s)", codec.split()[0], use_audio)
             try:
                 proc = subprocess.Popen(
                     cmd,
@@ -443,7 +443,7 @@ if sys.platform == "win32":
                 self._running = True
                 self._start_time = time.time()
                 threading.Thread(
-                    target=self._watch, args=(proc, codec_idx),
+                    target=self._watch, args=(proc, codec_idx, use_audio),
                     name="win-recorder-watcher", daemon=True,
                 ).start()
             except Exception as e:
@@ -452,7 +452,7 @@ if sys.platform == "win32":
                 if self._on_crash:
                     self._on_crash(str(e))
 
-        def _watch(self, proc: subprocess.Popen, codec_idx: int) -> None:
+        def _watch(self, proc: subprocess.Popen, codec_idx: int, use_audio: bool = True) -> None:
             stderr_out = b""
             if proc.stderr:
                 try:
@@ -463,22 +463,29 @@ if sys.platform == "win32":
             if self._shutdown.is_set():
                 return
             elapsed = time.time() - self._start_time
-            if stderr_out:
-                tail = stderr_out.decode(errors="replace")[-600:].strip()
+            stderr_str = stderr_out.decode(errors="replace") if stderr_out else ""
+            if stderr_str:
+                tail = stderr_str[-600:].strip()
                 log.error("ffmpeg stderr: %s", tail)
-            # Quick exit likely means codec not supported — try fallback
-            if elapsed < 5.0 and codec_idx + 1 < len(_WIN_CODECS):
-                log.warning(
-                    "Codec %s failed (%.1fs), trying %s",
-                    _WIN_CODECS[codec_idx].split()[0], elapsed,
-                    _WIN_CODECS[codec_idx + 1].split()[0],
-                )
-                self._launch(codec_idx + 1)
-            else:
-                self._running = False
-                log.error("ffmpeg recorder exited after %.1fs", elapsed)
-                if self._on_crash:
-                    self._on_crash("ffmpeg recorder exited unexpectedly")
+            if elapsed < 5.0:
+                # WASAPI loopback not supported — retry from scratch without audio
+                if use_audio and "loopback" in stderr_str.lower():
+                    log.warning("WASAPI loopback unsupported, retrying without audio")
+                    self._launch(0, use_audio=False)
+                    return
+                # Codec not supported — try next codec
+                if codec_idx + 1 < len(_WIN_CODECS):
+                    log.warning(
+                        "Codec %s failed (%.1fs), trying %s",
+                        _WIN_CODECS[codec_idx].split()[0], elapsed,
+                        _WIN_CODECS[codec_idx + 1].split()[0],
+                    )
+                    self._launch(codec_idx + 1, use_audio)
+                    return
+            self._running = False
+            log.error("ffmpeg recorder exited after %.1fs", elapsed)
+            if self._on_crash:
+                self._on_crash("ffmpeg recorder exited unexpectedly")
 
         def stop(self) -> None:
             self._shutdown.set()
