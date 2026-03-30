@@ -2377,10 +2377,57 @@ class SettingsDialog(QWidget):
         # Detect discord config changes before saving (for restart prompt)
         try:
             from ..config import load_config as _lc2
-            _prev_dc = _lc2().discord
+            _cur_cfg = _lc2()
+            _prev_dc = _cur_cfg.discord
             _dc_changed = _prev_dc != cfg.discord
         except Exception:
+            _cur_cfg = None
             _dc_changed = False
+
+        # Confirm if recorder will need to restart
+        try:
+            from ..daemon_utils import get_daemon_pid as _gdp
+            from ..daemon import _recorder_settings_changed as _rsc
+            if _gdp() and _cur_cfg is not None and _rsc(_cur_cfg, cfg):
+                _dlg_r = QDialog(self)
+                _dlg_r.setWindowTitle("restart recorder?")
+                _dlg_r.setStyleSheet(
+                    f"QDialog {{ background-color: {C.SURFACE}; color: {C.TEXT}; }}"
+                )
+                _lay_r = QVBoxLayout(_dlg_r)
+                _lay_r.setContentsMargins(20, 20, 20, 20)
+                _lay_r.setSpacing(12)
+                _lbl_r = QLabel(
+                    "saving these settings will restart the recorder.<br>"
+                    "the current buffer will be lost."
+                )
+                _lbl_r.setWordWrap(True)
+                _lbl_r.setStyleSheet(f"color: {C.TEXT}; font-size: 13px;")
+                _lay_r.addWidget(_lbl_r)
+                _row_r = QHBoxLayout()
+                _row_r.addStretch()
+                _btn_base_r = "QPushButton { padding: 6px 18px; border-radius: 6px; font-size: 13px; }"
+                _btn_no_r = QPushButton("cancel")
+                _btn_no_r.setStyleSheet(
+                    _btn_base_r +
+                    f"QPushButton {{ background-color: {C.OVERLAY}; color: {C.TEXT}; border: none; }}"
+                    f"QPushButton:hover {{ background-color: {C.BORDER}; }}"
+                )
+                _btn_yes_r = QPushButton("save and restart")
+                _btn_yes_r.setStyleSheet(
+                    _btn_base_r +
+                    f"QPushButton {{ background-color: {C.PINK}; color: {C.BG}; border: none; font-weight: bold; }}"
+                    f"QPushButton:hover {{ background-color: #e07090; }}"
+                )
+                _btn_no_r.clicked.connect(_dlg_r.reject)
+                _btn_yes_r.clicked.connect(_dlg_r.accept)
+                _row_r.addWidget(_btn_no_r)
+                _row_r.addWidget(_btn_yes_r)
+                _lay_r.addLayout(_row_r)
+                if _dlg_r.exec() != QDialog.DialogCode.Accepted:
+                    return
+        except Exception:
+            pass
 
         save_config(cfg)
 
