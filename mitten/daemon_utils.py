@@ -42,33 +42,50 @@ def get_daemon_pid() -> int | None:
     except (FileNotFoundError, ValueError, OSError):
         return None
 
-    try:
-        os.kill(pid, 0)  # signal 0 = existence check, no actual signal
-    except (ProcessLookupError, PermissionError, OSError):
-        # Process is gone — remove the stale PID file
+    if sys.platform == "win32":
+        # On Windows, use psutil for both existence and name check — os.kill(pid, 0)
+        # can raise PermissionError for valid processes due to UAC, which would
+        # incorrectly delete the PID file and make the GUI always show "Start".
         try:
-            PID_FILE.unlink(missing_ok=True)
-        except OSError:
-            pass
-        return None
-
-    # Guard against recycled PIDs — verify it's actually a mitten/python process
-    try:
-        if sys.platform == "win32":
             import psutil
-            comm = psutil.Process(pid).name()
-        else:
-            comm = Path(f"/proc/{pid}/comm").read_text().strip()
-        if "python" not in comm and "mitten" not in comm:
+            p = psutil.Process(pid)
+            comm = p.name()
+            if "python" not in comm and "mitten" not in comm:
+                try:
+                    PID_FILE.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                return None
+        except psutil.NoSuchProcess:
             try:
                 PID_FILE.unlink(missing_ok=True)
             except OSError:
                 pass
             return None
-    except OSError:
-        pass  # /proc unavailable; skip name check
-    except Exception:
-        pass  # psutil error; skip name check
+        except Exception:
+            pass  # psutil error; assume alive
+    else:
+        try:
+            os.kill(pid, 0)  # signal 0 = existence check, no actual signal
+        except (ProcessLookupError, OSError):
+            # Process is gone — remove the stale PID file
+            try:
+                PID_FILE.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return None
+
+        # Guard against recycled PIDs — verify it's actually a mitten/python process
+        try:
+            comm = Path(f"/proc/{pid}/comm").read_text().strip()
+            if "python" not in comm and "mitten" not in comm:
+                try:
+                    PID_FILE.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                return None
+        except OSError:
+            pass  # /proc unavailable; skip name check
 
     return pid
 
