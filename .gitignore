@@ -37,6 +37,9 @@ CLAUDE.md
 .DS_Store
 Thumbs.db
 
+# MCP config
+.mcp.json
+
 # Project runtime (never commit user config or clips)
 *.mp4
 /tmp/
