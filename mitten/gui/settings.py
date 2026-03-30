@@ -921,16 +921,62 @@ class SettingsDialog(QWidget):
         form.addRow("Framerate", _fps_col)
 
         self._monitor_combo = QComboBox()
-        self._monitor_combo.addItems(["auto"])
         self._monitor_combo.setEditable(True)
+        self._monitor_combo.addItem("auto (primary)", "auto")
+        _monitor_detected = False
         if sys.platform == "win32":
             try:
                 from screeninfo import get_monitors as _get_monitors
-                for _mi, _mon in enumerate(_get_monitors()):
-                    _label = f"{_mon.name or f'Display {_mi + 1}'} ({_mon.width}×{_mon.height})"
-                    self._monitor_combo.addItem(_label, _mon.name or "auto")
+                _mons = _get_monitors()
+                for _mi, _mon in enumerate(_mons):
+                    _primary_tag = " ★ primary" if getattr(_mon, "is_primary", False) else ""
+                    _label = f"Display {_mi + 1}{_primary_tag} ({_mon.width}×{_mon.height})"
+                    self._monitor_combo.addItem(_label, _mon.name or f"display{_mi}")
+                if _mons:
+                    _monitor_detected = True
+            except Exception as _e:
+                log.debug("screeninfo monitor detection failed: %s", _e)
+        else:
+            # Linux: detect via wlr-randr or kscreen-doctor
+            try:
+                import subprocess as _sp
+                _out = _sp.check_output(["wlr-randr"], text=True, timeout=5,
+                                        stderr=_sp.DEVNULL)
+                for _line in _out.splitlines():
+                    # Lines like: "DP-1 "Dell U2722D" (normal left ...) 2560x1440 @ 144 Hz"
+                    if _line and not _line.startswith(" ") and not _line.startswith("\t"):
+                        _parts = _line.split()
+                        if _parts:
+                            _name = _parts[0]
+                            # Find resolution token (WxH)
+                            _res = next((p for p in _parts if "x" in p and p.replace("x", "").isdigit()), "")
+                            _label = f"{_name} ({_res})" if _res else _name
+                            self._monitor_combo.addItem(_label, _name)
+                            _monitor_detected = True
             except Exception:
                 pass
+            if not _monitor_detected:
+                try:
+                    import subprocess as _sp
+                    _out = _sp.check_output(["kscreen-doctor", "--outputs"],
+                                            text=True, timeout=5, stderr=_sp.DEVNULL)
+                    for _line in _out.splitlines():
+                        _parts = _line.split()
+                        if "Output:" in _parts and "enabled" in _parts:
+                            try:
+                                _name = _parts[_parts.index("Output:") + 2]
+                                # Find resolution in parts (e.g. "1920x1080@144")
+                                _res = next((p.split("@")[0] for p in _parts
+                                             if "x" in p and "@" in p), "")
+                                _label = f"{_name} ({_res})" if _res else _name
+                                self._monitor_combo.addItem(_label, _name)
+                                _monitor_detected = True
+                            except (IndexError, ValueError):
+                                pass
+                except Exception:
+                    pass
+        if not _monitor_detected:
+            self._monitor_combo.setPlaceholderText("type monitor name (e.g. DP-1)")
         form.addRow("Monitor", self._monitor_combo)
 
         dir_row = QHBoxLayout()
