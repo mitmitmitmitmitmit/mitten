@@ -57,6 +57,50 @@ GITHUB_URL = "https://github.com/mitmitmitmitmitmit/mitten.git"
 # Update check
 # ------------------------------------------------------------------ #
 
+_WINDOWS_RELEASE_URL = "https://github.com/mitmitmitmitmitmit/mitten/releases/tag/v0.3.7-windows"
+_WINDOWS_RAW_TOML = "https://raw.githubusercontent.com/mitmitmitmitmitmit/mitten/windows/pyproject.toml"
+
+
+def check_for_update_windows() -> str | None:
+    """
+    Windows update check (no git required).
+    Fetches pyproject.toml from the windows branch on GitHub and compares
+    the version to the currently installed version.
+    Returns the remote version string if newer, or None.
+    """
+    try:
+        import importlib.metadata
+        import urllib.request
+
+        with urllib.request.urlopen(_WINDOWS_RAW_TOML, timeout=10) as resp:
+            content = resp.read().decode()
+
+        remote_ver = ""
+        for line in content.splitlines():
+            if line.strip().startswith("version"):
+                remote_ver = line.split("=")[1].strip().strip('"')
+                break
+        if not remote_ver:
+            return None
+
+        try:
+            current_ver = importlib.metadata.version("mitten")
+        except Exception:
+            return None
+
+        def _ver_tuple(v: str) -> tuple:
+            try:
+                return tuple(int(x) for x in v.split("."))
+            except Exception:
+                return (0,)
+
+        if _ver_tuple(remote_ver) > _ver_tuple(current_ver):
+            return remote_ver
+        return None
+    except Exception:
+        return None
+
+
 def check_for_update() -> tuple[str, str] | None:
     """
     Fetches from the GitHub URL directly (no remote config needed),

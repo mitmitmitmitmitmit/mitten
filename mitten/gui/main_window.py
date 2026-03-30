@@ -77,16 +77,22 @@ class _NavButton(QPushButton):
 
 
 class _UpdateCheckerThread(QThread):
-    """Runs check_for_update() off the main thread (git fetch is slow)."""
+    """Runs update check off the main thread."""
     update_found = pyqtSignal(str, str, str)  # (old_hash, new_hash, new_version)
 
     def run(self) -> None:
         try:
-            from ..updater import check_for_update
-            result = check_for_update()
-            if result:
-                old_hash, new_hash, new_ver = result
-                self.update_found.emit(old_hash, new_hash, new_ver)
+            if sys.platform == "win32":
+                from ..updater import check_for_update_windows
+                ver = check_for_update_windows()
+                if ver:
+                    self.update_found.emit("", "", ver)
+            else:
+                from ..updater import check_for_update
+                result = check_for_update()
+                if result:
+                    old_hash, new_hash, new_ver = result
+                    self.update_found.emit(old_hash, new_hash, new_ver)
         except Exception:
             pass
 
@@ -2987,11 +2993,18 @@ class MittenMainWindow(QMainWindow):
         display_ver = f"v{new_ver}" if new_ver else new_hash
 
         from .. import notify as _notify
-        _notify.notify(
-            f"{CAT}  Mitten update available",
-            f"v{self._current_ver} → {display_ver}  — click Update in the app to install",
-            urgency="normal", icon="software-update-available", timeout_ms=6000,
-        )
+        if sys.platform == "win32":
+            _notify.notify(
+                f"mitten update available",
+                f"v{self._current_ver} → {display_ver}  — click Update to download the new exe",
+                urgency="normal", timeout_ms=6000,
+            )
+        else:
+            _notify.notify(
+                f"{CAT}  Mitten update available",
+                f"v{self._current_ver} → {display_ver}  — click Update in the app to install",
+                urgency="normal", icon="software-update-available", timeout_ms=6000,
+            )
 
         self._dashboard.banner.show_update_available()
 
@@ -3005,7 +3018,12 @@ class MittenMainWindow(QMainWindow):
         self._ver_update_widget.show()
 
     def _do_update(self) -> None:
-        """Spawn update terminal and quit the GUI."""
+        """Spawn update terminal (Linux) or open releases page (Windows)."""
+        if sys.platform == "win32":
+            from ..updater import _WINDOWS_RELEASE_URL
+            import os
+            os.startfile(_WINDOWS_RELEASE_URL)
+            return
         if not self._update_hashes:
             return
         old_hash, new_hash = self._update_hashes

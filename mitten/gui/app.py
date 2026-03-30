@@ -50,6 +50,118 @@ def _create_lock() -> socket.socket | None:
         return None
 
 
+def _check_ffmpeg_windows() -> None:
+    """On Windows, check ffmpeg is installed. If not, offer to install via winget."""
+    if sys.platform != "win32":
+        return
+    import shutil
+    if shutil.which("ffmpeg"):
+        return
+
+    import subprocess
+    import threading
+    from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QPlainTextEdit
+    from PyQt6.QtCore import Qt
+
+    from .resources import C
+
+    has_winget = bool(shutil.which("winget"))
+
+    dlg = QDialog()
+    dlg.setWindowTitle("mitten — ffmpeg required")
+    dlg.setMinimumWidth(460)
+    dlg.setStyleSheet(
+        f"QDialog {{ background-color: {C.BG}; color: {C.TEXT}; }}"
+        f"QLabel {{ color: {C.TEXT}; background: transparent; }}"
+        f"QPlainTextEdit {{ background: {C.SURFACE}; color: {C.TEXT}; border: 1px solid {C.BORDER}; border-radius: 4px; }}"
+    )
+    lay = QVBoxLayout(dlg)
+    lay.setContentsMargins(24, 20, 24, 20)
+    lay.setSpacing(14)
+
+    lbl = QLabel(
+        "<b>ffmpeg is not installed.</b><br><br>"
+        "mitten needs ffmpeg to record. "
+        + (
+            "click <b>Install automatically</b> to install it via winget, or install manually:"
+            if has_winget else
+            "install it manually with winget:"
+        )
+        + "<br><br><code>winget install Gyan.FFmpeg</code><br><br>"
+        "after installing, <b>restart mitten</b>."
+    )
+    lbl.setWordWrap(True)
+    lbl.setTextFormat(Qt.TextFormat.RichText)
+    lbl.setStyleSheet(f"font-size: 13px; color: {C.TEXT};")
+    lay.addWidget(lbl)
+
+    output = QPlainTextEdit()
+    output.setReadOnly(True)
+    output.setFixedHeight(100)
+    output.setVisible(False)
+    lay.addWidget(output)
+
+    _btn_base = "QPushButton { padding: 8px 20px; border-radius: 6px; font-size: 13px; border: none; }"
+
+    row = QHBoxLayout()
+    row.addStretch()
+
+    btn_close = QPushButton("close")
+    btn_close.setStyleSheet(
+        _btn_base +
+        f"QPushButton {{ background: {C.OVERLAY}; color: {C.TEXT}; }}"
+        f"QPushButton:hover {{ background: {C.BORDER}; }}"
+    )
+    btn_close.clicked.connect(dlg.accept)
+    row.addWidget(btn_close)
+
+    if has_winget:
+        btn_install = QPushButton("install automatically")
+        btn_install.setStyleSheet(
+            _btn_base +
+            f"QPushButton {{ background: {C.GREEN}; color: {C.BG}; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: #40a060; }}"
+        )
+
+        def _run_install():
+            btn_install.setEnabled(False)
+            btn_install.setText("installing…")
+            output.setVisible(True)
+            output.setPlainText("running: winget install Gyan.FFmpeg\n")
+
+            def _worker():
+                try:
+                    proc = subprocess.Popen(
+                        ["winget", "install", "Gyan.FFmpeg",
+                         "--accept-source-agreements", "--accept-package-agreements"],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True,
+                    )
+                    assert proc.stdout is not None
+                    for line in proc.stdout:
+                        output.appendPlainText(line.rstrip())
+                    proc.wait()
+                    if proc.returncode == 0:
+                        output.appendPlainText("\ninstalled. restart mitten to start recording.")
+                        btn_install.setText("done — restart mitten")
+                    else:
+                        output.appendPlainText(f"\nwinget exited with code {proc.returncode}. try manually: winget install Gyan.FFmpeg")
+                        btn_install.setText("install failed")
+                        btn_install.setEnabled(True)
+                except Exception as exc:
+                    output.appendPlainText(f"\nerror: {exc}")
+                    btn_install.setText("install failed")
+                    btn_install.setEnabled(True)
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+        btn_install.clicked.connect(_run_install)
+        row.addWidget(btn_install)
+
+    lay.addLayout(row)
+    dlg.exec()
+
+
 def _check_wayland() -> None:
     """Show a one-time warning if not running under Wayland."""
     if sys.platform == "win32":
@@ -111,6 +223,8 @@ def run_app(abuse_reveal: bool = False) -> None:
         pass
 
     app.setStyleSheet(make_stylesheet())
+
+    _check_ffmpeg_windows()
 
     # Single-instance lock
     lock = _create_lock()
