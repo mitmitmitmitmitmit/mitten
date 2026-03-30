@@ -14,6 +14,23 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 _APP_NAME = "Mitten"
+_WIN_APPID_REGISTERED = False
+
+
+def _win_register_appid() -> None:
+    """Register AUMID in the registry so Windows allows toast notifications.
+    Must be called before the first winotify toast or it will be silently dropped."""
+    global _WIN_APPID_REGISTERED
+    if _WIN_APPID_REGISTERED:
+        return
+    try:
+        import winreg
+        key_path = r"Software\Classes\AppUserModelId\Mitten"
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, _APP_NAME)
+        _WIN_APPID_REGISTERED = True
+    except Exception as e:
+        log.debug("Failed to register Windows AUMID: %s", e)
 
 
 def notify(
@@ -27,6 +44,7 @@ def notify(
     if sys.platform == "win32":
         def _win_notify() -> None:
             try:
+                _win_register_appid()
                 from winotify import Notification, audio  # type: ignore
                 toast = Notification(
                     app_id=_APP_NAME,
