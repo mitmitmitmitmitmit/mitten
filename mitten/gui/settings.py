@@ -1202,7 +1202,6 @@ class SettingsDialog(QWidget):
             except Exception:
                 pass
         self._mic_combo.currentIndexChanged.connect(self._toggle_mic_fields)
-        self._toggle_mic_fields()
         form.addRow("Mic device", self._mic_combo)
 
         # Mic volume
