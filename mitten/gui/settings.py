@@ -349,10 +349,21 @@ class _SpecsAdvisor(QWidget):
                         rows.append(("cpu", cpu[:32], "framerate: 60fps ok", True))
                         break
             else:
-                import platform
-                cpu = platform.processor()[:32]
+                try:
+                    import winreg as _wr
+                    with _wr.OpenKey(_wr.HKEY_LOCAL_MACHINE,
+                                     r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as _k:
+                        cpu, _ = _wr.QueryValueEx(_k, "ProcessorNameString")
+                    cpu = (cpu.strip()
+                           .replace("Intel(R) Core(TM) ", "")
+                           .replace("Intel(R) ", "")
+                           .replace("AMD ", "")
+                           .replace(" CPU @ ", " @ "))
+                except Exception:
+                    import platform
+                    cpu = platform.processor()
                 if cpu:
-                    rows.append(("cpu", cpu, "framerate: 60fps ok", True))
+                    rows.append(("cpu", cpu[:32], "framerate: 60fps ok", True))
         except Exception:
             pass
 
@@ -1097,28 +1108,47 @@ class SettingsDialog(QWidget):
         self._audio_combo.addItem("System default", "default")
         self._audio_combo.addItem("(no audio)", "")
 
-        import subprocess as _sp, re as _re
-        _win_audio_devs: list[str] = []
+        _win_audio_out: list[str] = []  # WASAPI output devices (desktop loopback)
+        _win_audio_in: list[str] = []   # WASAPI input devices (mic)
+        import subprocess as _sp
         if sys.platform == "win32":
-            # Enumerate DirectShow audio devices via ffmpeg
-            try:
-                _dshow = _sp.run(
-                    ["ffmpeg", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
-                    capture_output=True, text=True, timeout=5, stdin=_sp.DEVNULL,
-                )
-                _in_audio = False
-                for _ln in _dshow.stderr.splitlines():
-                    if "audio devices" in _ln.lower():
-                        _in_audio = True
-                        continue
-                    if _in_audio:
-                        _m = _re.search(r'"(.+?)"', _ln)
-                        if _m:
-                            _dev = _m.group(1)
-                            _win_audio_devs.append(_dev)
-                            self._audio_combo.addItem(_dev, _dev)
-            except Exception:
-                pass
+            # Enumerate WASAPI audio endpoints from Windows registry
+            def _enum_wasapi(category: str) -> list[str]:
+                import winreg as _wr
+                devs: list[str] = []
+                try:
+                    _path = rf"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\{category}"
+                    with _wr.OpenKey(_wr.HKEY_LOCAL_MACHINE, _path) as _hcat:
+                        _i = 0
+                        while True:
+                            try:
+                                _sub = _wr.EnumKey(_hcat, _i)
+                                with _wr.OpenKey(_hcat, _sub) as _hdev:
+                                    try:
+                                        _state, _ = _wr.QueryValueEx(_hdev, "DeviceState")
+                                        if _state != 1:  # 1 = active/enabled
+                                            _i += 1
+                                            continue
+                                    except FileNotFoundError:
+                                        pass
+                                    try:
+                                        with _wr.OpenKey(_hdev, "Properties") as _hp:
+                                            _name, _ = _wr.QueryValueEx(
+                                                _hp, "{a45c254e-df1c-4efd-8020-67d146a850e0},2")
+                                            devs.append(_name.strip())
+                                    except FileNotFoundError:
+                                        pass
+                                _i += 1
+                            except OSError:
+                                break
+                except Exception:
+                    pass
+                return devs
+
+            _win_audio_out = _enum_wasapi("Render")
+            _win_audio_in = _enum_wasapi("Capture")
+            for _dev in _win_audio_out:
+                self._audio_combo.addItem(_dev, _dev)
         else:
             _gsr_lines: list[str] = []
             try:
@@ -1145,9 +1175,8 @@ class SettingsDialog(QWidget):
         self._mic_combo = QComboBox()
         self._mic_combo.addItem("(no mic)", "")
         if sys.platform == "win32":
-            for _dev in _win_audio_devs:
-                if any(k in _dev.lower() for k in ("mic", "input", "capture", "headset")):
-                    self._mic_combo.addItem(_dev, _dev)
+            for _dev in _win_audio_in:
+                self._mic_combo.addItem(_dev, _dev)
         else:
             _input_prefixes = ("alsa_input.", "default_input", "bluez_input.")
             try:

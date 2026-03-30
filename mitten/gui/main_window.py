@@ -1042,15 +1042,17 @@ class _SysInfoSection(QWidget):
         except Exception:
             rows.append("daemon    unknown")
         try:
-            import subprocess as _sp
-            r = _sp.run(
-                ["gpu-screen-recorder", "--version"],
-                capture_output=True, text=True, timeout=5,
-            )
-            ver = (r.stdout.strip() or r.stderr.strip()).split("\n")[0][:40]
-            rows.append(f"gsr       {ver}")
+            import subprocess as _sp, sys as _sys
+            if _sys.platform == "win32":
+                r = _sp.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=5)
+                ver = (r.stdout.strip() or r.stderr.strip()).split("\n")[0][:40]
+                rows.append(f"ffmpeg    {ver}")
+            else:
+                r = _sp.run(["gpu-screen-recorder", "--version"], capture_output=True, text=True, timeout=5)
+                ver = (r.stdout.strip() or r.stderr.strip()).split("\n")[0][:40]
+                rows.append(f"gsr       {ver}")
         except Exception:
-            rows.append("gsr       not found")
+            rows.append("ffmpeg    not found" if sys.platform == "win32" else "gsr       not found")
         for i, lbl in enumerate(self._lines):
             lbl.setText(rows[i] if i < len(rows) else "")
 
@@ -1818,8 +1820,8 @@ class _DebugPage(QWidget):
             clips_dir = Path.home() / "Videos" / "mitten"
         clips_dir.mkdir(parents=True, exist_ok=True)
         if sys.platform == "win32":
-            subprocess.Popen(["explorer", str(clips_dir)],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            import os as _os
+            _os.startfile(str(clips_dir))
         else:
             subprocess.Popen(["xdg-open", str(clips_dir)],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -1859,8 +1861,15 @@ class _DebugPage(QWidget):
 
         try:
             if sys.platform == "win32":
-                import platform as _platform
-                cpu = _platform.processor()
+                try:
+                    import winreg as _wr
+                    with _wr.OpenKey(_wr.HKEY_LOCAL_MACHINE,
+                                     r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as _k:
+                        cpu, _ = _wr.QueryValueEx(_k, "ProcessorNameString")
+                    cpu = cpu.strip()
+                except Exception:
+                    import platform as _platform
+                    cpu = _platform.processor()
                 if cpu:
                     lines.append(f"cpu       {cpu}")
                 else:
@@ -1894,17 +1903,27 @@ class _DebugPage(QWidget):
             display = _os.environ.get("WAYLAND_DISPLAY") or _os.environ.get("DISPLAY") or "unknown"
         lines.append(f"display   {display}")
 
-        try:
-            r = subprocess.run(
-                ["gpu-screen-recorder", "--version"],
-                capture_output=True, text=True, timeout=5,
-            )
-            ver = (r.stdout.strip() or r.stderr.strip()).split("\n")[0][:60] or "(no output)"
-            lines.append(f"gsr       {ver}")
-        except FileNotFoundError:
-            lines.append("gsr       not found")
-        except Exception as exc:
-            lines.append(f"gsr       error: {exc}")
+        if sys.platform == "win32":
+            try:
+                r = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=5)
+                ver = (r.stdout.strip() or r.stderr.strip()).split("\n")[0][:60] or "(no output)"
+                lines.append(f"ffmpeg    {ver}")
+            except FileNotFoundError:
+                lines.append("ffmpeg    not found")
+            except Exception as exc:
+                lines.append(f"ffmpeg    error: {exc}")
+        else:
+            try:
+                r = subprocess.run(
+                    ["gpu-screen-recorder", "--version"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                ver = (r.stdout.strip() or r.stderr.strip()).split("\n")[0][:60] or "(no output)"
+                lines.append(f"gsr       {ver}")
+            except FileNotFoundError:
+                lines.append("gsr       not found")
+            except Exception as exc:
+                lines.append(f"gsr       error: {exc}")
 
         self._sys_info.setText("\n".join(lines))
 

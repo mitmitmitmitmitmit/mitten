@@ -391,12 +391,12 @@ if sys.platform == "win32":
                 "-i", "desktop",
             ]
 
-            # Audio: "default" → WASAPI loopback; named device → dshow
+            # Audio: WASAPI loopback for all desktop audio
             audio_raw = r.audio_device.split("|")[0].strip() if r.audio_device else ""
             if audio_raw == "default":
                 cmd += ["-f", "wasapi", "-loopback", "1", "-i", ""]
             elif audio_raw:
-                cmd += ["-f", "dshow", "-i", f"audio={audio_raw}"]
+                cmd += ["-f", "wasapi", "-loopback", "1", "-i", audio_raw]
 
             cmd += ["-c:v"] + codec.split()
 

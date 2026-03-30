@@ -85,10 +85,31 @@ class _WinPipeHandle:
             total += written if written else len(data)
 
     def recv(self, n: int) -> bytes:
-        return self._handle.read(n)
+        result: list[bytes] = []
+        exc: list[Exception] = []
+        done = threading.Event()
+
+        def _r() -> None:
+            try:
+                result.append(self._handle.read(n))
+            except Exception as e:
+                exc.append(e)
+            finally:
+                done.set()
+
+        threading.Thread(target=_r, daemon=True).start()
+        if not done.wait(5.0):
+            try:
+                self._handle.close()
+            except Exception:
+                pass
+            raise OSError("discord ipc recv timeout")
+        if exc:
+            raise exc[0]
+        return result[0] if result else b""
 
     def settimeout(self, timeout) -> None:
-        pass  # Named pipes don't support socket-style timeouts
+        pass  # timeout handled per-read via threading
 
     def close(self) -> None:
         try:
@@ -120,7 +141,7 @@ class DiscordPresence:
         presence.clear()
     """
 
-    _RECONNECT_DELAY = 15.0   # seconds between reconnect attempts
+    _RECONNECT_DELAY = 5.0    # seconds between reconnect attempts
     _SEND_TIMEOUT   = 5.0     # socket send/recv timeout
 
     def __init__(self) -> None:
