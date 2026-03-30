@@ -357,6 +357,37 @@ _WIN_CODECS = [          # tried in order; first that survives >5s is kept
     "libx264 -preset ultrafast",
 ]
 
+def _win_capture_geometry(config: MittenConfig) -> tuple[int, int, int, int] | None:
+    """
+    Return (x, y, width, height) for the monitor to capture on Windows.
+    'auto' → primary monitor. A specific monitor name (e.g. '\\\\.\\DISPLAY1') → that monitor.
+    Returns None if screeninfo is unavailable (caller falls back to full desktop).
+    """
+    try:
+        from screeninfo import get_monitors
+        monitors = get_monitors()
+    except Exception:
+        return None
+
+    monitor_cfg = config.general.monitor
+    if monitor_cfg == "auto":
+        target = next((m for m in monitors if m.is_primary), monitors[0] if monitors else None)
+    else:
+        target = next((m for m in monitors if m.name == monitor_cfg), None)
+        if target is None:
+            # Name not matched — fall back to primary
+            target = next((m for m in monitors if m.is_primary), monitors[0] if monitors else None)
+
+    if target is None:
+        return None
+    return (target.x, target.y, target.width, target.height)
+
+
+# NVENC max resolution: conservative limit for older GPUs (Maxwell/Pascal = 4096).
+# Turing+ supports 8192, but we don't know the GPU generation at startup.
+_NVENC_MAX_DIM = 4096
+
+
 if sys.platform == "win32":
     class FfmpegWindowsRecorder:
         """
@@ -384,10 +415,21 @@ if sys.platform == "win32":
             num_segs = max(4, cfg.general.buffer_seconds // _WIN_SEG_SECS + 3)
             seg_pattern = str(TMP_DIR / "winseg_%03d.ts")
 
+            geom = _win_capture_geometry(cfg)
+            gdigrab_args: list[str] = []
+            if geom:
+                x, y, w, h = geom
+                gdigrab_args += [
+                    "-offset_x", str(x),
+                    "-offset_y", str(y),
+                    "-video_size", f"{w}x{h}",
+                ]
+
             cmd = [
                 "ffmpeg", "-y",
                 "-f", "gdigrab",
                 "-framerate", str(cfg.general.framerate),
+                *gdigrab_args,
                 "-i", "desktop",
             ]
 
@@ -430,7 +472,28 @@ if sys.platform == "win32":
                         f.unlink()
                     except OSError:
                         pass
-            self._launch(0)
+
+            # Check capture resolution — NVENC has a max dimension on older GPUs
+            geom = _win_capture_geometry(self._config)
+            start_codec = 0
+            if geom:
+                _, _, w, h = geom
+                if w > _NVENC_MAX_DIM or h > _NVENC_MAX_DIM:
+                    log.warning(
+                        "Capture resolution %dx%d exceeds NVENC safe limit (%dpx) — "
+                        "skipping NVENC, using libx264 (expect higher CPU usage)",
+                        w, h, _NVENC_MAX_DIM,
+                    )
+                    start_codec = next(
+                        (i for i, c in enumerate(_WIN_CODECS) if "nvenc" not in c),
+                        0,
+                    )
+            else:
+                log.warning(
+                    "Could not detect monitor resolution — capturing full virtual desktop. "
+                    "If CPU/RAM usage is high, set a specific monitor in Settings."
+                )
+            self._launch(start_codec)
 
         def _launch(self, codec_idx: int, use_audio: bool = True, use_loopback: bool = True) -> None:
             codec = _WIN_CODECS[codec_idx]
