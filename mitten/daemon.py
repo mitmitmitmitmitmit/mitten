@@ -34,6 +34,7 @@ def _recorder_settings_changed(old: MittenConfig, new: MittenConfig) -> bool:
     og, ng = old.general, new.general
     or_, nr = old.recorder, new.recorder
     return (
+        og.mode         != ng.mode         or
         og.monitor      != ng.monitor      or
         og.framerate    != ng.framerate    or
         og.buffer_seconds != ng.buffer_seconds or
@@ -42,6 +43,14 @@ def _recorder_settings_changed(old: MittenConfig, new: MittenConfig) -> bool:
         or_.container     != nr.container     or
         or_.audio_device  != nr.audio_device  or
         or_.mic_device    != nr.mic_device
+    )
+
+
+def _trigger_settings_changed(old: MittenConfig, new: MittenConfig) -> bool:
+    """Return True if the trigger button or cooldown changed."""
+    return (
+        old.trigger.button   != new.trigger.button or
+        old.trigger.cooldown != new.trigger.cooldown
     )
 
 
@@ -406,8 +415,11 @@ class MittenDaemon:
             return None
         if not dc.show_mode_label:
             return "Mitten"
-        if self._config.general.mode == "window":
+        mode = self._config.general.mode
+        if mode == "window":
             return "window with Mitten"
+        if mode == "game":
+            return "game with Mitten"
         return "desktop with Mitten"
 
     def _on_game_start(self, game: "GameInfo") -> None:
@@ -614,8 +626,25 @@ class MittenDaemon:
             if self._recorder.is_running() and _recorder_settings_changed(old_cfg, new_cfg):
                 self._recorder.restart()
                 log.info("Config reload: recorder settings changed, restarted")
+                self._set_presence("recording", name_override=self._recording_name())
             else:
                 log.info("Config reload: non-recorder settings updated, recorder kept running")
+
+        # Restart trigger listener if button or cooldown changed
+        if _trigger_settings_changed(old_cfg, new_cfg):
+            try:
+                self._trigger.stop()
+                self._trigger = TriggerListener(
+                    new_cfg,
+                    on_trigger=self._on_trigger,
+                    on_error=self._on_trigger_error,
+                    on_triple_trigger=self._on_triple_trigger,
+                )
+                self._trigger.start()
+                log.info("Config reload: trigger settings changed, listener restarted (button=%s)",
+                         new_cfg.trigger.button)
+            except Exception as e:
+                log.error("Trigger restart after reload failed: %s", e)
 
         log.info("Config reloaded (mode: %s → %s)", old_mode, new_mode)
 
