@@ -165,56 +165,67 @@ def _show_crash_dialog(exc_type: type, exc_value: BaseException, tb_text: str) -
 
         open_btn.clicked.connect(_open_log_folder)
 
-        revert_btn = QPushButton("Revert to previous version")
-        revert_btn.setStyleSheet(
-            "QPushButton { background: #fab387; color: #1e1e2e; border: none;"
-            "border-radius: 6px; padding: 7px 16px; font-weight: 600; }"
-            "QPushButton:hover { background: #f9c096; }"
-        )
-
-        def _do_revert() -> None:
-            revert_btn.setEnabled(False)
-            revert_btn.setText("reverting…")
-            try:
-                from .updater import restore_backup, get_repo_dir
-                import subprocess as _sub
-                import json as _json
-                # Capture the bad version before reverting
+        if sys.platform == "win32":
+            revert_btn = QPushButton("Download previous release")
+            revert_btn.setStyleSheet(
+                "QPushButton { background: #fab387; color: #1e1e2e; border: none;"
+                "border-radius: 6px; padding: 7px 16px; font-weight: 600; }"
+                "QPushButton:hover { background: #f9c096; }"
+            )
+            def _do_revert() -> None:
+                from .updater import _WINDOWS_RELEASE_URL
+                import os as _os
+                _os.startfile(_WINDOWS_RELEASE_URL)
+        else:
+            revert_btn = QPushButton("Revert to previous version")
+            revert_btn.setStyleSheet(
+                "QPushButton { background: #fab387; color: #1e1e2e; border: none;"
+                "border-radius: 6px; padding: 7px 16px; font-weight: 600; }"
+                "QPushButton:hover { background: #f9c096; }"
+            )
+            def _do_revert() -> None:
+                revert_btn.setEnabled(False)
+                revert_btn.setText("reverting…")
                 try:
-                    from importlib.metadata import version as _iv
-                    _bad_ver = _iv("mitten")
-                except Exception:
-                    _bad_ver = ""
-                repo = get_repo_dir()
-                ok = repo is not None and restore_backup(repo)
-                if ok:
-                    # Write revert lock so update notifications stay suppressed
-                    # until a version newer than the bad one is published
-                    if _bad_ver:
-                        try:
-                            from .config import REVERT_LOCK_FILE
-                            REVERT_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-                            REVERT_LOCK_FILE.write_text(
-                                _json.dumps({"blocked_version": _bad_ver})
-                            )
-                        except Exception:
-                            pass
-                    _sub.run(
-                        [sys.executable, "-m", "pip", "install", "-e", ".",
-                         "--break-system-packages", "-q"],
-                        cwd=repo, capture_output=True,
-                    )
-                    _sub.Popen(
-                        ["systemctl", "--user", "restart", "mitten.service"],
-                        stdout=_sub.DEVNULL, stderr=_sub.DEVNULL,
-                    )
-                    revert_btn.setText("reverted — relaunch mitten")
-                else:
-                    revert_btn.setText("no backup found")
+                    from .updater import restore_backup, get_repo_dir
+                    import subprocess as _sub
+                    import json as _json
+                    # Capture the bad version before reverting
+                    try:
+                        from importlib.metadata import version as _iv
+                        _bad_ver = _iv("mitten")
+                    except Exception:
+                        _bad_ver = ""
+                    repo = get_repo_dir()
+                    ok = repo is not None and restore_backup(repo)
+                    if ok:
+                        # Write revert lock so update notifications stay suppressed
+                        # until a version newer than the bad one is published
+                        if _bad_ver:
+                            try:
+                                from .config import REVERT_LOCK_FILE
+                                REVERT_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+                                REVERT_LOCK_FILE.write_text(
+                                    _json.dumps({"blocked_version": _bad_ver})
+                                )
+                            except Exception:
+                                pass
+                        _sub.run(
+                            [sys.executable, "-m", "pip", "install", "-e", ".",
+                             "--break-system-packages", "-q"],
+                            cwd=repo, capture_output=True,
+                        )
+                        _sub.Popen(
+                            ["systemctl", "--user", "restart", "mitten.service"],
+                            stdout=_sub.DEVNULL, stderr=_sub.DEVNULL,
+                        )
+                        revert_btn.setText("reverted — relaunch mitten")
+                    else:
+                        revert_btn.setText("no backup found")
+                        revert_btn.setEnabled(True)
+                except Exception as _e:
+                    revert_btn.setText(f"failed: {_e}")
                     revert_btn.setEnabled(True)
-            except Exception as _e:
-                revert_btn.setText(f"failed: {_e}")
-                revert_btn.setEnabled(True)
 
         revert_btn.clicked.connect(_do_revert)
 
