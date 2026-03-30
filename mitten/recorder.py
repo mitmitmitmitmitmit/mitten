@@ -378,7 +378,7 @@ if sys.platform == "win32":
             self._codec_idx = 0
             self._start_time = 0.0
 
-        def _build_command(self, codec: str, use_audio: bool = True) -> list[str]:
+        def _build_command(self, codec: str, use_audio: bool = True, use_loopback: bool = True) -> list[str]:
             cfg = self._config
             r = cfg.recorder
             num_segs = max(4, cfg.general.buffer_seconds // _WIN_SEG_SECS + 3)
@@ -391,12 +391,16 @@ if sys.platform == "win32":
                 "-i", "desktop",
             ]
 
-            # Audio: WASAPI loopback for all desktop audio
             audio_raw = r.audio_device.split("|")[0].strip() if r.audio_device else ""
-            if use_audio and audio_raw == "default":
-                cmd += ["-f", "wasapi", "-loopback", "1", "-i", "default"]
-            elif use_audio and audio_raw:
-                cmd += ["-f", "wasapi", "-loopback", "1", "-i", audio_raw]
+            if use_audio and audio_raw:
+                device = "default" if audio_raw == "default" else audio_raw
+                if use_loopback:
+                    # WASAPI loopback: captures desktop audio output
+                    cmd += ["-f", "wasapi", "-loopback", "1", "-i", device]
+                else:
+                    # WASAPI without loopback flag — works on some builds that
+                    # don't recognise -loopback but still support render capture
+                    cmd += ["-f", "wasapi", "-i", device]
 
             cmd += ["-c:v"] + codec.split()
 
@@ -428,10 +432,13 @@ if sys.platform == "win32":
                         pass
             self._launch(0)
 
-        def _launch(self, codec_idx: int, use_audio: bool = True) -> None:
+        def _launch(self, codec_idx: int, use_audio: bool = True, use_loopback: bool = True) -> None:
             codec = _WIN_CODECS[codec_idx]
-            cmd = self._build_command(codec, use_audio)
-            log.info("Starting Windows recorder (codec=%s, audio=%s)", codec.split()[0], use_audio)
+            cmd = self._build_command(codec, use_audio, use_loopback)
+            log.info(
+                "Starting Windows recorder (codec=%s, audio=%s, loopback=%s)",
+                codec.split()[0], use_audio, use_loopback,
+            )
             try:
                 proc = subprocess.Popen(
                     cmd,
@@ -443,7 +450,7 @@ if sys.platform == "win32":
                 self._running = True
                 self._start_time = time.time()
                 threading.Thread(
-                    target=self._watch, args=(proc, codec_idx, use_audio),
+                    target=self._watch, args=(proc, codec_idx, use_audio, use_loopback),
                     name="win-recorder-watcher", daemon=True,
                 ).start()
             except Exception as e:
@@ -452,7 +459,7 @@ if sys.platform == "win32":
                 if self._on_crash:
                     self._on_crash(str(e))
 
-        def _watch(self, proc: subprocess.Popen, codec_idx: int, use_audio: bool = True) -> None:
+        def _watch(self, proc: subprocess.Popen, codec_idx: int, use_audio: bool = True, use_loopback: bool = True) -> None:
             # Drain stderr continuously — if we block-read it only on exit, the pipe
             # fills up, ffmpeg stalls on stderr writes, and gdigrab buffers raw frames
             # in RAM (250 MB/s at 1080p30 → GBs in seconds).
@@ -480,10 +487,18 @@ if sys.platform == "win32":
                 tail = stderr_str[-600:].strip()
                 log.error("ffmpeg stderr: %s", tail)
             if elapsed < 5.0:
-                # WASAPI loopback not supported — retry from scratch without audio
-                if use_audio and "loopback" in stderr_str.lower():
-                    log.warning("WASAPI loopback unsupported, retrying without audio")
-                    self._launch(0, use_audio=False)
+                # WASAPI loopback flag not supported — retry without -loopback flag
+                # (some builds support WASAPI render capture without it)
+                if use_audio and use_loopback and "loopback" in stderr_str.lower():
+                    log.warning("WASAPI -loopback unsupported, retrying WASAPI without loopback flag")
+                    self._launch(0, use_audio=True, use_loopback=False)
+                    return
+                # WASAPI without loopback also failed — drop audio entirely
+                if use_audio and not use_loopback and (
+                    "wasapi" in stderr_str.lower() or elapsed < 1.0
+                ):
+                    log.warning("WASAPI audio failed, retrying without audio")
+                    self._launch(0, use_audio=False, use_loopback=False)
                     return
                 # Codec not supported — try next codec
                 if codec_idx + 1 < len(_WIN_CODECS):
@@ -492,7 +507,7 @@ if sys.platform == "win32":
                         _WIN_CODECS[codec_idx].split()[0], elapsed,
                         _WIN_CODECS[codec_idx + 1].split()[0],
                     )
-                    self._launch(codec_idx + 1, use_audio)
+                    self._launch(codec_idx + 1, use_audio, use_loopback)
                     return
             self._running = False
             log.error("ffmpeg recorder exited after %.1fs", elapsed)
