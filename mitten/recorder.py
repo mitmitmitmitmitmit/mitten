@@ -453,17 +453,29 @@ if sys.platform == "win32":
                     self._on_crash(str(e))
 
         def _watch(self, proc: subprocess.Popen, codec_idx: int, use_audio: bool = True) -> None:
-            stderr_out = b""
-            if proc.stderr:
-                try:
-                    stderr_out = proc.stderr.read()
-                except Exception:
-                    pass
+            # Drain stderr continuously — if we block-read it only on exit, the pipe
+            # fills up, ffmpeg stalls on stderr writes, and gdigrab buffers raw frames
+            # in RAM (250 MB/s at 1080p30 → GBs in seconds).
+            from collections import deque
+            stderr_lines: deque[bytes] = deque(maxlen=200)
+
+            def _drain() -> None:
+                if proc.stderr:
+                    try:
+                        for line in proc.stderr:
+                            stderr_lines.append(line)
+                    except Exception:
+                        pass
+
+            drain_t = threading.Thread(target=_drain, name="win-stderr-drain", daemon=True)
+            drain_t.start()
             proc.wait()
+            drain_t.join(timeout=2)
+
             if self._shutdown.is_set():
                 return
             elapsed = time.time() - self._start_time
-            stderr_str = stderr_out.decode(errors="replace") if stderr_out else ""
+            stderr_str = b"".join(stderr_lines).decode(errors="replace")
             if stderr_str:
                 tail = stderr_str[-600:].strip()
                 log.error("ffmpeg stderr: %s", tail)
