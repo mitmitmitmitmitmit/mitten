@@ -142,6 +142,18 @@ def _do_process(
         if auto_compress and actual_seconds > 0:
             log.info("Encoding clip (mitten mark only, targeted): %s (%ds)", filename, actual_seconds)
             success = _encode_targeted(raw_path, output_path, None, target_mb, actual_seconds, light_mode=light_mode)
+            if not success:
+                log.warning("Targeted encode failed, falling back to copy: %s", filename)
+                try:
+                    shutil.copy2(str(raw_path), str(output_path))
+                    raw_path.unlink(missing_ok=True)
+                    success = True
+                except OSError as e2:
+                    msg = _efmt(E_SAVE_MOVE, f"Failed to copy clip: {e2}")
+                    log.error(msg)
+                    if on_failure:
+                        on_failure(msg)
+                    return
         else:
             log.info("Encoding clip (mitten mark only): %s (%ds)", filename, actual_seconds)
             cmd = _build_mitten_mark_cmd(raw_path, output_path, light_mode=light_mode)
@@ -149,18 +161,25 @@ def _do_process(
                 result = subprocess.run(cmd, capture_output=True, timeout=120)
                 success = result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0
                 if not success:
+                    log.warning("mitten mark NVENC failed, retrying software")
+                    cmd_sw = _build_mitten_mark_cmd(raw_path, output_path, light_mode=light_mode, software=True)
+                    result = subprocess.run(cmd_sw, capture_output=True, timeout=180)
+                    success = result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0
+                if not success:
                     log.warning("mitten mark encode failed, falling back to copy")
-                    shutil.move(str(raw_path), str(output_path))
+                    shutil.copy2(str(raw_path), str(output_path))
+                    raw_path.unlink(missing_ok=True)
                     success = True
                 else:
                     raw_path.unlink(missing_ok=True)
             except (subprocess.TimeoutExpired, OSError) as e:
                 log.warning("mitten mark encode error: %s — falling back to copy", e)
                 try:
-                    shutil.move(str(raw_path), str(output_path))
+                    shutil.copy2(str(raw_path), str(output_path))
+                    raw_path.unlink(missing_ok=True)
                     success = True
                 except OSError as e2:
-                    msg = _efmt(E_SAVE_MOVE, f"Failed to move clip: {e2}")
+                    msg = _efmt(E_SAVE_MOVE, f"Failed to copy clip: {e2}")
                     log.error(msg)
                     if on_failure:
                         on_failure(msg)
@@ -186,10 +205,15 @@ def _do_process(
         success = _encode_targeted(raw_path, output_path, wm, target_mb, actual_seconds, light_mode=light_mode)
 
         if not success:
-            output_path.unlink(missing_ok=True)
-            if on_failure:
-                on_failure(_efmt(E_SAVE_FFMPEG_ENCODE, "Encode failed — check journal for details"))
-            return
+            log.warning("Targeted encode failed, saving raw clip without watermark: %s", filename)
+            try:
+                shutil.copy2(str(raw_path), str(output_path))
+                raw_path.unlink(missing_ok=True)
+            except OSError as e:
+                output_path.unlink(missing_ok=True)
+                if on_failure:
+                    on_failure(_efmt(E_SAVE_MOVE, f"Failed to copy clip: {e}"))
+                return
 
         raw_path.unlink(missing_ok=True)
 
@@ -412,7 +436,7 @@ def _run_x264_twopass(
         "-b:v", f"{video_kbps}k",
         "-pass", "1",
         "-passlogfile", passlog,
-        "-an", "-f", "null", "/dev/null",
+        "-an", "-f", "null", _NULL,
     ]
     cmd2 = [
         "ffmpeg", "-y",
@@ -493,6 +517,19 @@ def _build_watermark_cmd(
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
+def _win_fontfile() -> str:
+    """Return a fontfile= clause for drawtext on Windows, bypassing fontconfig."""
+    for candidate in [
+        r"C:/Windows/Fonts/arial.ttf",
+        r"C:/Windows/Fonts/segoeui.ttf",
+        r"C:/Windows/Fonts/tahoma.ttf",
+    ]:
+        if Path(candidate.replace("/", "\\")).exists():
+            safe = candidate.replace("\\", "/").replace(":", "\\:")
+            return f":fontfile='{safe}'"
+    return ""
+
+
 def _drawtext_filter(
     text: str,
     subtext: str,
@@ -512,6 +549,8 @@ def _drawtext_filter(
     shadow = ":shadowcolor=black@0.7:shadowx=2:shadowy=2"
     subshadow = ":shadowcolor=black@0.5:shadowx=1:shadowy=1"
     line_gap = subsize + 6
+    # On Windows, drawtext needs an explicit fontfile to bypass missing fontconfig
+    ff = _win_fontfile() if sys.platform == "win32" else ""
 
     if position == "bottom_right":
         main_x, sub_x = f"W-tw-{p}", f"W-tw-{p}"
@@ -532,12 +571,12 @@ def _drawtext_filter(
     main_filter = (
         f"drawtext=text='{safe_main}'"
         f":fontsize={fontsize}:fontcolor={fontcolor}"
-        f":x={main_x}:y={main_y}" + shadow
+        f":x={main_x}:y={main_y}" + ff + shadow
     )
     sub_filter = (
         f"drawtext=text='{safe_sub}'"
         f":fontsize={subsize}:fontcolor={subcolor}"
-        f":x={sub_x}:y={sub_y}" + subshadow
+        f":x={sub_x}:y={sub_y}" + ff + subshadow
     )
     return f"{main_filter},{sub_filter}"
 
@@ -547,12 +586,13 @@ def _light_mode_shame_filter() -> str:
     Bottom-left corner, low opacity — it's there. they can't remove it."""
     text = "this user is a freak that uses light mode"
     safe = text.replace("'", "\\'").replace(":", "\\:")
+    ff = _win_fontfile() if sys.platform == "win32" else ""
     return (
         f"drawtext=text='{safe}'"
         f":fontsize=11"
         f":fontcolor=white@0.18"
         f":x=8:y=H-th-8"
-        f":shadowcolor=black@0.3:shadowx=1:shadowy=1"
+        f":shadowcolor=black@0.3:shadowx=1:shadowy=1" + ff
     )
 
 
@@ -565,11 +605,12 @@ def _mitten_mark_filter() -> str:
         ver = ""
     text = f"mitten v{ver}" if ver else "mitten"
     safe = text.replace("'", "\\'").replace(":", "\\:")
+    ff = _win_fontfile() if sys.platform == "win32" else ""
     return (
         f"drawtext=text='{safe}'"
         f":fontsize=12:fontcolor=white@0.4"
         f":x=8:y=H-th-8"
-        f":shadowcolor=black@0.5:shadowx=1:shadowy=1"
+        f":shadowcolor=black@0.5:shadowx=1:shadowy=1" + ff
     )
 
 
@@ -577,17 +618,22 @@ def _build_mitten_mark_cmd(
     input_path: Path,
     output_path: Path,
     light_mode: bool = False,
+    software: bool = False,
 ) -> list[str]:
     """Minimal CQ encode that burns only the hardcoded mitten mark (no user watermark)."""
     vf_parts = [_mitten_mark_filter()]
     if light_mode:
         vf_parts.append(_light_mode_shame_filter())
     vf = ",".join(vf_parts)
+    if software:
+        encoder = ["-c:v", "libx264", "-preset", "fast", "-crf", "26"]
+    else:
+        encoder = ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "26"]
     return [
         "ffmpeg", "-y",
         "-i", str(input_path),
         "-vf", vf,
-        "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "26",
+        *encoder,
         "-pix_fmt", "yuv420p",
         "-c:a", "copy",
         "-movflags", "+faststart",
