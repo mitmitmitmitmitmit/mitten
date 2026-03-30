@@ -394,7 +394,7 @@ if sys.platform == "win32":
             # Audio: WASAPI loopback for all desktop audio
             audio_raw = r.audio_device.split("|")[0].strip() if r.audio_device else ""
             if audio_raw == "default":
-                cmd += ["-f", "wasapi", "-loopback", "1", "-i", ""]
+                cmd += ["-f", "wasapi", "-loopback", "1", "-i", "default"]
             elif audio_raw:
                 cmd += ["-f", "wasapi", "-loopback", "1", "-i", audio_raw]
 
@@ -436,7 +436,7 @@ if sys.platform == "win32":
                 proc = subprocess.Popen(
                     cmd,
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
                     stdin=subprocess.DEVNULL,
                 )
                 self._proc = proc
@@ -453,10 +453,19 @@ if sys.platform == "win32":
                     self._on_crash(str(e))
 
         def _watch(self, proc: subprocess.Popen, codec_idx: int) -> None:
+            stderr_out = b""
+            if proc.stderr:
+                try:
+                    stderr_out = proc.stderr.read()
+                except Exception:
+                    pass
             proc.wait()
             if self._shutdown.is_set():
                 return
             elapsed = time.time() - self._start_time
+            if stderr_out:
+                tail = stderr_out.decode(errors="replace")[-600:].strip()
+                log.error("ffmpeg stderr: %s", tail)
             # Quick exit likely means codec not supported — try fallback
             if elapsed < 5.0 and codec_idx + 1 < len(_WIN_CODECS):
                 log.warning(
