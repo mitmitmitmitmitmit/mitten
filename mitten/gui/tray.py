@@ -7,6 +7,7 @@ Left-click shows/hides the main window. Middle-click triggers a save.
 from __future__ import annotations
 
 import random
+import sys
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QAction
@@ -227,11 +228,13 @@ class MittenTray(QSystemTrayIcon):
         import subprocess
         from ..config import GUI_SOCKET
 
-        # Remove the socket lock NOW so the new instance doesn't see "already running"
-        try:
-            GUI_SOCKET.unlink(missing_ok=True)
-        except Exception:
-            pass
+        # On Linux, remove the AF_UNIX socket file so the new instance doesn't
+        # see "already running". On Windows we use a TCP port lock — no file to remove.
+        if sys.platform != "win32":
+            try:
+                GUI_SOCKET.unlink(missing_ok=True)
+            except Exception:
+                pass
 
         mitten_bin = shutil.which("mitten")
         if mitten_bin:

@@ -4,6 +4,7 @@ Opens the main window on startup; tray icon for minimize-to-tray.
 """
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import socket
@@ -15,11 +16,28 @@ from PyQt6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 from .resources import make_stylesheet
 from ..config import GUI_SOCKET
 
+log = logging.getLogger(__name__)
+
+# Windows single-instance guard uses a TCP server socket on this port.
+# AF_UNIX leaves stale socket files on Windows when a process crashes,
+# causing the "already running" check to wrongly fire on the next launch.
+_GUI_LOCK_PORT = 47822
+
 
 def _is_already_running() -> bool:
-    """Check if another MITTEN GUI instance is running via a socket lock."""
+    """Check if another MITTEN GUI instance is running."""
+    if sys.platform == "win32":
+        # On Windows use a TCP probe — AF_UNIX leaves stale files after crashes
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.5)
+            result = s.connect_ex(("127.0.0.1", _GUI_LOCK_PORT))
+            s.close()
+            return result == 0
+        except OSError:
+            return False
     if not hasattr(socket, "AF_UNIX"):
-        return False  # AF_UNIX not available on this platform
+        return False
     sock_path = str(GUI_SOCKET)
     if os.path.exists(sock_path):
         try:
@@ -36,9 +54,17 @@ def _is_already_running() -> bool:
 
 
 def _create_lock() -> socket.socket | None:
-    """Create a socket lock so only one GUI instance runs."""
+    """Create a lock so only one GUI instance runs."""
+    if sys.platform == "win32":
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.bind(("127.0.0.1", _GUI_LOCK_PORT))
+            s.listen(1)
+            return s
+        except OSError:
+            return None
     if not hasattr(socket, "AF_UNIX"):
-        return None  # AF_UNIX not available on this platform
+        return None
     sock_path = str(GUI_SOCKET)
     os.makedirs(os.path.dirname(sock_path), exist_ok=True)
     try:
@@ -197,9 +223,11 @@ def _check_wayland() -> None:
 
 def run_app(abuse_reveal: bool = False) -> None:
     """Launch the MITTEN GUI — main window + system tray."""
+    log.info("Starting MITTEN GUI")
     _check_wayland()
 
     if _is_already_running():
+        log.info("Another GUI instance detected — exiting")
         app = QApplication(sys.argv)
         app.setStyleSheet(make_stylesheet())
         QMessageBox.information(
@@ -266,9 +294,10 @@ def run_app(abuse_reveal: bool = False) -> None:
     # Clean up lock
     if lock:
         lock.close()
-        try:
-            os.unlink(str(GUI_SOCKET))
-        except OSError:
-            pass
+        if sys.platform != "win32":
+            try:
+                os.unlink(str(GUI_SOCKET))
+            except OSError:
+                pass
 
     sys.exit(exit_code)
