@@ -75,6 +75,8 @@ class RecorderConfig:
 class TriggerConfig:
     button: str = "BTN_EXTRA"
     cooldown: float = 3.0
+    trigger_type: str = "mouse"   # "mouse" or "keyboard"
+    trigger_key: str = ""         # pynput GlobalHotKeys format, e.g. "<f9>"
 
 
 @dataclass(frozen=True)
@@ -231,6 +233,8 @@ def load_config(config_path: Path | None = None) -> MittenConfig:
         trigger=TriggerConfig(
             button=_parse_button(t.get("button", "BTN_EXTRA")),
             cooldown=float(t.get("cooldown", 3.0)),
+            trigger_type=str(t.get("trigger_type", "mouse")),
+            trigger_key=str(t.get("trigger_key", "")),
         ),
         watermark=WatermarkConfig(
             enabled=bool(wm.get("enabled", True)),

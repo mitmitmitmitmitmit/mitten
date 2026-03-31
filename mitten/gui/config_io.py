@@ -52,6 +52,8 @@ compression_target_mb = {r.compression_target_mb}
 [trigger]
 button = {_q(t.button)}
 cooldown = {t.cooldown}
+trigger_type = {_q(t.trigger_type)}
+trigger_key = {_q(t.trigger_key)}
 
 [watermark]
 enabled = {_bool(wm.enabled)}

@@ -294,3 +294,149 @@ class ButtonDetectDialog(QDialog):
         self._worker.cancel()
         self._worker.wait(2000)
         super().closeEvent(event)
+
+
+# ------------------------------------------------------------------ #
+# Keyboard key detection (Windows — pynput keyboard)
+# ------------------------------------------------------------------ #
+
+class KeyDetectWorker(QThread):
+    """Listens for the first keyboard key press and emits it as a GlobalHotKeys string."""
+    detected = pyqtSignal(str)  # e.g. "<f9>", "s"
+    error    = pyqtSignal(str)
+    status   = pyqtSignal(str)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._abort = False
+
+    def cancel(self) -> None:
+        self._abort = True
+
+    def run(self) -> None:
+        import threading as _threading
+        try:
+            from pynput.keyboard import Listener, Key
+        except ImportError:
+            self.error.emit("pynput not installed — run: pip install pynput")
+            return
+
+        detected_event = _threading.Event()
+        result_key: list[str] = []
+
+        # Keys to ignore (modifiers only — user probably wants a combo anchor)
+        _MODIFIER_KEYS: set = set()
+        try:
+            _MODIFIER_KEYS = {
+                Key.ctrl, Key.ctrl_l, Key.ctrl_r,
+                Key.alt, Key.alt_l, Key.alt_r,
+                Key.shift, Key.shift_l, Key.shift_r,
+                Key.cmd, Key.cmd_l, Key.cmd_r,
+            }
+        except Exception:
+            pass
+
+        def _key_to_str(key) -> str:
+            try:
+                return f"<{key.name}>"
+            except AttributeError:
+                try:
+                    return key.char if key.char else str(key)
+                except AttributeError:
+                    return str(key)
+
+        def _on_press(key):
+            if self._abort:
+                return False
+            if key in _MODIFIER_KEYS:
+                return  # wait for a non-modifier key
+            key_str = _key_to_str(key)
+            result_key.append(key_str)
+            detected_event.set()
+            return False  # stop listener
+
+        self.status.emit("Press the key you want to use as your trigger…")
+        listener = Listener(on_press=_on_press)
+        listener.start()
+
+        deadline = time.monotonic() + 30.0
+        while not self._abort and not detected_event.is_set() and time.monotonic() < deadline:
+            time.sleep(0.1)
+
+        listener.stop()
+
+        if result_key:
+            self.detected.emit(result_key[0])
+        elif not self._abort:
+            self.error.emit("Timed out — no key press detected in 30s.")
+
+        log.debug("KeyDetectWorker done")
+
+
+class KeyDetectDialog(QDialog):
+    """Modal dialog: 'Press a key…' with cancel. After accepted, .result() returns the key string."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Detect Key")
+        self.setModal(True)
+        self.setMinimumWidth(320)
+        self.setStyleSheet(
+            f"QDialog {{ background-color: {C.BG}; color: {C.TEXT}; }}"
+        )
+        self._result: str | None = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(16)
+
+        cat = QLabel("~( ^.x.^)>")
+        cat.setStyleSheet(
+            f"color: {C.LAVENDER}; font-size: 20px; font-weight: 700; {CAT_FONT}"
+        )
+        layout.addWidget(cat)
+
+        prompt = QLabel("Press any key you want to use as your trigger.\n(F-keys, letters, numbers, etc.)")
+        prompt.setStyleSheet(f"color: {C.TEXT}; font-size: 13px;")
+        layout.addWidget(prompt)
+
+        self._status = QLabel("Listening…")
+        self._status.setStyleSheet(f"color: {C.SUBTEXT}; font-size: 12px;")
+        layout.addWidget(self._status)
+
+        btns = QHBoxLayout()
+        btns.setSpacing(10)
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setProperty("class", "secondary")
+        self._cancel_btn.clicked.connect(self._on_cancel)
+        btns.addStretch()
+        btns.addWidget(self._cancel_btn)
+        layout.addLayout(btns)
+
+        self._worker = KeyDetectWorker(self)
+        self._worker.detected.connect(self._on_detected)
+        self._worker.error.connect(self._on_error)
+        self._worker.status.connect(self._status.setText)
+        self._worker.start()
+
+    def _on_detected(self, key_str: str) -> None:
+        self._result = key_str
+        self._worker.wait(2000)
+        self.accept()
+
+    def _on_error(self, msg: str) -> None:
+        self._status.setText(f"Error: {msg}")
+        self._cancel_btn.setText("Close")
+
+    def _on_cancel(self) -> None:
+        self._worker.cancel()
+        self._worker.wait(2000)
+        self.reject()
+
+    def result(self) -> str | None:  # type: ignore[override]
+        return self._result
+
+    def closeEvent(self, event) -> None:
+        self._worker.cancel()
+        self._worker.wait(2000)
+        super().closeEvent(event)

@@ -47,10 +47,12 @@ def _recorder_settings_changed(old: MittenConfig, new: MittenConfig) -> bool:
 
 
 def _trigger_settings_changed(old: MittenConfig, new: MittenConfig) -> bool:
-    """Return True if the trigger button or cooldown changed."""
+    """Return True if any trigger setting changed."""
     return (
-        old.trigger.button   != new.trigger.button or
-        old.trigger.cooldown != new.trigger.cooldown
+        old.trigger.button       != new.trigger.button or
+        old.trigger.cooldown     != new.trigger.cooldown or
+        old.trigger.trigger_type != new.trigger.trigger_type or
+        old.trigger.trigger_key  != new.trigger.trigger_key
     )
 
 

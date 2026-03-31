@@ -1040,6 +1040,13 @@ class SettingsDialog(QWidget):
 
         form.addRow(_sep("TRIGGER"))
 
+        self._trigger_type_combo = QComboBox()
+        self._trigger_type_combo.addItem("Mouse button")
+        self._trigger_type_combo.addItem("Keyboard key")
+        self._trigger_type_combo.currentIndexChanged.connect(self._toggle_trigger_type_fields)
+        form.addRow("Type", self._trigger_type_combo)
+
+        # Mouse button row
         btn_row = QHBoxLayout()
         self._trigger_btn_label = QLabel("BTN_EXTRA (276)")
         self._trigger_btn_label.setStyleSheet(
@@ -1053,7 +1060,26 @@ class SettingsDialog(QWidget):
         self._detect_btn.clicked.connect(self._on_detect_button)
         btn_row.addWidget(self._trigger_btn_label, 1)
         btn_row.addWidget(self._detect_btn)
-        form.addRow("Button", btn_row)
+        self._mouse_btn_label_widget = QLabel("Button")
+        self._mouse_btn_row_widget = btn_row
+        form.addRow(self._mouse_btn_label_widget, btn_row)
+
+        # Keyboard key row
+        key_row = QHBoxLayout()
+        self._trigger_key_label = QLabel("<none>")
+        self._trigger_key_label.setStyleSheet(
+            f"color: {C.TEXT}; font-size: 13px; font-weight: bold;"
+            f"background-color: {_hex_rgba(C.SURFACE, 0.6)}; padding: 6px 12px;"
+            f"border-radius: 4px; border: 1px solid {C.BORDER};"
+        )
+        self._key_detect_btn = QPushButton("Detect…")
+        self._key_detect_btn.setProperty("class", "secondary")
+        self._key_detect_btn.setMinimumWidth(72)
+        self._key_detect_btn.clicked.connect(self._on_detect_key)
+        key_row.addWidget(self._trigger_key_label, 1)
+        key_row.addWidget(self._key_detect_btn)
+        self._key_label_widget = QLabel("Key")
+        form.addRow(self._key_label_widget, key_row)
 
         self._cooldown_spin = QDoubleSpinBox()
         self._cooldown_spin.setRange(1.0, 10.0)
@@ -1061,6 +1087,8 @@ class SettingsDialog(QWidget):
         self._cooldown_spin.setSuffix("s")
         self._cooldown_spin.setValue(3.0)
         form.addRow("Cooldown", self._cooldown_spin)
+
+        self._toggle_trigger_type_fields()
 
         form.addRow(_sep("NOTIFICATIONS"))
 
@@ -2024,6 +2052,16 @@ class SettingsDialog(QWidget):
         if row >= 0:
             self._title_list.takeItem(row)
 
+    def _toggle_trigger_type_fields(self, _=None) -> None:
+        """Show/hide mouse or keyboard trigger fields based on selected type."""
+        is_keyboard = self._trigger_type_combo.currentText() == "Keyboard key"
+        self._mouse_btn_label_widget.setVisible(not is_keyboard)
+        self._trigger_btn_label.setVisible(not is_keyboard)
+        self._detect_btn.setVisible(not is_keyboard)
+        self._key_label_widget.setVisible(is_keyboard)
+        self._trigger_key_label.setVisible(is_keyboard)
+        self._key_detect_btn.setVisible(is_keyboard)
+
     def _on_detect_button(self) -> None:
         from .button_detect import ButtonDetectDialog
         from PyQt6.QtWidgets import QDialog
@@ -2033,6 +2071,15 @@ class SettingsDialog(QWidget):
             if result:
                 _code, name = result
                 self._trigger_btn_label.setText(name)
+
+    def _on_detect_key(self) -> None:
+        from .button_detect import KeyDetectDialog
+        from PyQt6.QtWidgets import QDialog
+        dlg = KeyDetectDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            key_str = dlg.result()
+            if key_str:
+                self._trigger_key_label.setText(key_str)
 
     def _load_config(self, cfg=None) -> None:
         if cfg is None:
@@ -2110,6 +2157,13 @@ class SettingsDialog(QWidget):
             code = BUTTON_NAMES.get(t.button, "?")
             self._trigger_btn_label.setText(f"{t.button}  ({code})")
             self._cooldown_spin.setValue(t.cooldown)
+            if t.trigger_type == "keyboard":
+                self._trigger_type_combo.setCurrentText("Keyboard key")
+                if t.trigger_key:
+                    self._trigger_key_label.setText(t.trigger_key)
+            else:
+                self._trigger_type_combo.setCurrentText("Mouse button")
+            self._toggle_trigger_type_fields()
         except Exception:
             pass
 
@@ -2332,6 +2386,10 @@ class SettingsDialog(QWidget):
         )
         from .config_io import save_config
 
+        trigger_type = "keyboard" if self._trigger_type_combo.currentText() == "Keyboard key" else "mouse"
+        trigger_key = self._trigger_key_label.text() if trigger_type == "keyboard" else ""
+        if trigger_key in ("<none>", ""):
+            trigger_key = ""
         btn_label_text = self._trigger_btn_label.text()
         btn_name = btn_label_text.split("  (")[0].strip() if "  (" in btn_label_text else btn_label_text.strip() or "BTN_EXTRA"
 
@@ -2391,6 +2449,8 @@ class SettingsDialog(QWidget):
             trigger=TriggerConfig(
                 button=btn_name,
                 cooldown=self._cooldown_spin.value(),
+                trigger_type=trigger_type,
+                trigger_key=trigger_key,
             ),
             watermark=WatermarkConfig(
                 enabled=self._wm_enabled.isChecked(),

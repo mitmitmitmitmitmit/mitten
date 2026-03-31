@@ -63,6 +63,8 @@ class TriggerListener:
     ) -> None:
         self._button_code: int = button_name_to_code(config.trigger.button)
         self._cooldown: float = config.trigger.cooldown
+        self._trigger_type: str = config.trigger.trigger_type
+        self._trigger_key: str = config.trigger.trigger_key
         self._on_trigger = on_trigger
         self._on_error = on_error
         self._on_triple_trigger = on_triple_trigger
@@ -84,6 +86,8 @@ class TriggerListener:
         is available (Windows), False otherwise.
         """
         if sys.platform == "win32":
+            if self._trigger_type == "keyboard":
+                return self._start_pynput_keyboard()
             return self._start_pynput()
 
         if not _HAS_EVDEV:
@@ -273,6 +277,43 @@ class TriggerListener:
         target_button = self._pynput_button_for_code(self._button_code)
         if pressed and button == target_button:
             self._fire()
+
+    def _start_pynput_keyboard(self) -> bool:
+        """Windows: listen for a configured keyboard key via pynput GlobalHotKeys."""
+        try:
+            from pynput import keyboard
+        except ImportError:
+            msg = "pynput not installed. Run: pip install pynput"
+            log.error(msg)
+            if self._on_error:
+                self._on_error(msg)
+            return False
+
+        key_str = self._trigger_key.strip()
+        if not key_str:
+            msg = "No keyboard key configured. Set a key in Settings → Trigger."
+            log.error(msg)
+            if self._on_error:
+                self._on_error(msg)
+            return False
+
+        self._shutdown.clear()
+
+        def _on_activate():
+            self._fire()
+
+        try:
+            self._pynput_listener = keyboard.GlobalHotKeys({key_str: _on_activate})
+            self._pynput_listener.start()
+        except Exception as e:
+            msg = f"Failed to start keyboard listener for key '{key_str}': {e}"
+            log.error(msg)
+            if self._on_error:
+                self._on_error(msg)
+            return False
+
+        log.info("Trigger listener started (keyboard), key=%s", key_str)
+        return True
 
 
 def _fd_ok(fd: int) -> bool:
