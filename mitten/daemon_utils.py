@@ -46,8 +46,14 @@ def get_daemon_pid() -> int | None:
         # On Windows, use psutil for both existence and name check — os.kill(pid, 0)
         # can raise PermissionError for valid processes due to UAC, which would
         # incorrectly delete the PID file and make the GUI always show "Start".
+        # Import psutil separately first so that an ImportError (e.g. missing
+        # psutil._psutil_windows in a PyInstaller bundle) doesn't leave `psutil`
+        # unbound and cause UnboundLocalError in the except-psutil.NoSuchProcess clause.
         try:
             import psutil
+        except Exception:
+            return pid  # psutil unavailable; assume alive
+        try:
             p = psutil.Process(pid)
             comm = p.name()
             if "python" not in comm and "mitten" not in comm:
@@ -63,7 +69,7 @@ def get_daemon_pid() -> int | None:
                 pass
             return None
         except Exception:
-            pass  # psutil error; assume alive
+            pass  # other psutil error; assume alive
     else:
         try:
             os.kill(pid, 0)  # signal 0 = existence check, no actual signal

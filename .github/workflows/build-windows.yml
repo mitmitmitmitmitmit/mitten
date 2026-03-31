@@ -34,6 +34,7 @@ jobs:
             --icon mitten/assets/mitten.png `
             --add-data "mitten/assets;mitten/assets" `
             --collect-submodules mitten `
+            --collect-all psutil `
             mitten/__main__.py
 
       - name: Upload EXE to release
