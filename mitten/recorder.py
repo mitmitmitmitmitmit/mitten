@@ -346,16 +346,47 @@ class SessionRecorder:
             return None
 
 
-# ── Windows ffmpeg gdigrab recorder ──────────────────────────────────────────
-# Segment-based rolling buffer. ffmpeg captures the desktop via GDI and writes
-# short .ts segments to TMP_DIR. On trigger, recent segments are concatenated
-# into a .mp4 that ClipWatcher picks up for post-processing. No OBS required.
+# ── Windows ffmpeg recorder ───────────────────────────────────────────────────
+# Segment-based rolling buffer. ffmpeg captures the desktop and writes short
+# .ts segments to TMP_DIR. On trigger, recent segments are concatenated into a
+# .mp4 that ClipWatcher picks up for post-processing. No OBS required.
+#
+# Capture backend priority:
+#   1. ddagrab (DXGI Desktop Duplication) — GPU-side, near-zero game overhead.
+#      Requires FFmpeg 5.1+ with D3D11 support (available in Gyan full builds).
+#   2. gdigrab (GDI) — CPU-side fallback. Works on all Windows/FFmpeg versions
+#      but causes noticeable FPS drops when gaming.
+#
+# On startup, ddagrab is tried first. If ffmpeg exits within 5s (unsupported),
+# _use_ddagrab is flipped to False and gdigrab is used automatically.
 
-_WIN_SEG_SECS = 5        # each rolling segment is ~5 seconds
-_WIN_CODECS = [          # tried in order; first that survives >5s is kept
-    "h264_nvenc",
-    "libx264 -preset ultrafast",
+from typing import NamedTuple
+
+_WIN_SEG_SECS = 5
+
+
+class _WinCodec(NamedTuple):
+    name: str               # e.g. "h264_nvenc"
+    ffmpeg_args: list       # codec args to pass to ffmpeg
+    needs_hwupload: bool    # True for NVENC — video stays on GPU from ddagrab
+    needs_hwdownload: bool  # True for software encoders — must download from GPU
+
+
+_WIN_CODECS: list[_WinCodec] = [
+    _WinCodec(
+        name="h264_nvenc",
+        ffmpeg_args=["-c:v", "h264_nvenc"],
+        needs_hwupload=True,
+        needs_hwdownload=False,
+    ),
+    _WinCodec(
+        name="libx264",
+        ffmpeg_args=["-c:v", "libx264", "-preset", "ultrafast"],
+        needs_hwupload=False,
+        needs_hwdownload=True,
+    ),
 ]
+
 
 def _win_capture_geometry(config: MittenConfig) -> tuple[int, int, int, int] | None:
     """
@@ -388,10 +419,39 @@ def _win_capture_geometry(config: MittenConfig) -> tuple[int, int, int, int] | N
 _NVENC_MAX_DIM = 4096
 
 
+def _win_ddagrab_output_idx(config: MittenConfig) -> int:
+    """
+    Map config.general.monitor to a ddagrab output_idx integer.
+    'auto' → index of the primary monitor (is_primary=True), or 0 as fallback.
+    A specific monitor name (e.g. '\\\\.\\DISPLAY1') → position in get_monitors() list.
+    Falls back to 0 if screeninfo is unavailable or name not found.
+    """
+    try:
+        from screeninfo import get_monitors
+        monitors = get_monitors()
+    except Exception:
+        return 0
+
+    monitor_cfg = config.general.monitor
+    if monitor_cfg == "auto":
+        for i, m in enumerate(monitors):
+            if getattr(m, "is_primary", False):
+                return i
+        return 0
+
+    for i, m in enumerate(monitors):
+        if m.name == monitor_cfg:
+            return i
+
+    log.warning("Monitor '%s' not found in display list, falling back to output_idx=0", monitor_cfg)
+    return 0
+
+
 if sys.platform == "win32":
     class FfmpegWindowsRecorder:
         """
-        Windows recorder backend: ffmpeg gdigrab → rolling .ts segments.
+        Windows recorder backend: ffmpeg rolling .ts segments.
+        Uses ddagrab (DXGI, GPU-side) with automatic fallback to gdigrab (GDI, CPU-side).
         Mirrors GpuRecorder's interface so the daemon works unchanged.
         """
 
@@ -408,48 +468,86 @@ if sys.platform == "win32":
             self._shutdown = threading.Event()
             self._codec_idx = 0
             self._start_time = 0.0
+            self._use_ddagrab = True   # flipped to False if ddagrab fails at startup
 
-        def _build_command(self, codec: str, use_audio: bool = True, use_loopback: bool = True) -> list[str]:
+        def _build_command(self, codec: _WinCodec, use_audio: bool = True, use_loopback: bool = True) -> list[str]:
             cfg = self._config
             r = cfg.recorder
             num_segs = max(4, cfg.general.buffer_seconds // _WIN_SEG_SECS + 3)
             seg_pattern = str(TMP_DIR / "winseg_%03d.ts")
-
-            geom = _win_capture_geometry(cfg)
-            gdigrab_args: list[str] = []
-            if geom:
-                x, y, w, h = geom
-                gdigrab_args += [
-                    "-offset_x", str(x),
-                    "-offset_y", str(y),
-                    "-video_size", f"{w}x{h}",
-                ]
-
-            cmd = [
-                "ffmpeg", "-y",
-                "-f", "gdigrab",
-                "-framerate", str(cfg.general.framerate),
-                *gdigrab_args,
-                "-i", "desktop",
-            ]
+            fps = cfg.general.framerate
 
             audio_raw = r.audio_device.split("|")[0].strip() if r.audio_device else ""
-            if use_audio and audio_raw:
-                device = "default" if audio_raw == "default" else audio_raw
-                if use_loopback:
-                    # WASAPI loopback: captures desktop audio output
-                    cmd += ["-f", "wasapi", "-loopback", "1", "-i", device]
+            has_audio = use_audio and bool(audio_raw)
+
+            if self._use_ddagrab:
+                # ── DXGI Desktop Duplication path ──────────────────────────
+                # GPU-side capture: ddagrab → hwupload → h264_nvenc (stays on GPU)
+                #                   ddagrab → hwdownload → format=bgra → libx264
+                output_idx = _win_ddagrab_output_idx(cfg)
+                ddagrab_opts = f"output_idx={output_idx}:framerate={fps}:draw_mouse=1"
+                if codec.needs_hwupload:
+                    filter_chain = f"ddagrab={ddagrab_opts},hwupload"
                 else:
-                    # WASAPI without loopback flag — works on some builds that
-                    # don't recognise -loopback but still support render capture
-                    cmd += ["-f", "wasapi", "-i", device]
+                    filter_chain = f"ddagrab={ddagrab_opts},hwdownload,format=bgra"
 
-            cmd += ["-c:v"] + codec.split()
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-init_hw_device", "d3d11va",
+                    "-filter_complex", filter_chain,
+                ]
 
-            if use_audio and audio_raw:
-                cmd += ["-c:a", "aac", "-b:a", "128k"]
+                if has_audio:
+                    device = "default" if audio_raw == "default" else audio_raw
+                    if use_loopback:
+                        cmd += ["-f", "wasapi", "-loopback", "1", "-i", device]
+                    else:
+                        cmd += ["-f", "wasapi", "-i", device]
+
+                # With filter_complex providing video, explicitly map streams
+                if has_audio:
+                    cmd += ["-map", "v:0", "-map", "0:a"]
+
+                cmd += codec.ffmpeg_args
+
+                if has_audio:
+                    cmd += ["-c:a", "aac", "-b:a", "128k"]
+                else:
+                    cmd += ["-an"]
+
             else:
-                cmd += ["-an"]
+                # ── GDI fallback path (gdigrab) ─────────────────────────────
+                geom = _win_capture_geometry(cfg)
+                gdigrab_args: list[str] = []
+                if geom:
+                    x, y, w, h = geom
+                    gdigrab_args += [
+                        "-offset_x", str(x),
+                        "-offset_y", str(y),
+                        "-video_size", f"{w}x{h}",
+                    ]
+
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-f", "gdigrab",
+                    "-framerate", str(fps),
+                    *gdigrab_args,
+                    "-i", "desktop",
+                ]
+
+                if has_audio:
+                    device = "default" if audio_raw == "default" else audio_raw
+                    if use_loopback:
+                        cmd += ["-f", "wasapi", "-loopback", "1", "-i", device]
+                    else:
+                        cmd += ["-f", "wasapi", "-i", device]
+
+                cmd += codec.ffmpeg_args
+
+                if has_audio:
+                    cmd += ["-c:a", "aac", "-b:a", "128k"]
+                else:
+                    cmd += ["-an"]
 
             cmd += [
                 "-f", "segment",
@@ -467,6 +565,7 @@ if sys.platform == "win32":
                     return
                 self._shutdown.clear()
                 self._codec_idx = 0
+                self._use_ddagrab = True
                 for f in TMP_DIR.glob("winseg_*.ts"):
                     try:
                         f.unlink()
@@ -474,33 +573,35 @@ if sys.platform == "win32":
                         pass
 
             # Check capture resolution — NVENC has a max dimension on older GPUs
-            geom = _win_capture_geometry(self._config)
-            start_codec = 0
-            if geom:
-                _, _, w, h = geom
-                if w > _NVENC_MAX_DIM or h > _NVENC_MAX_DIM:
-                    log.warning(
-                        "Capture resolution %dx%d exceeds NVENC safe limit (%dpx) — "
-                        "skipping NVENC, using libx264 (expect higher CPU usage)",
-                        w, h, _NVENC_MAX_DIM,
-                    )
-                    start_codec = next(
-                        (i for i, c in enumerate(_WIN_CODECS) if "nvenc" not in c),
-                        0,
-                    )
-            else:
-                log.warning(
-                    "Could not detect monitor resolution — capturing full virtual desktop. "
-                    "If CPU/RAM usage is high, set a specific monitor in Settings."
-                )
-            self._launch(start_codec)
+            start_codec_idx = 0
+            try:
+                from screeninfo import get_monitors
+                monitors = get_monitors()
+                output_idx = _win_ddagrab_output_idx(self._config)
+                if output_idx < len(monitors):
+                    m = monitors[output_idx]
+                    if m.width > _NVENC_MAX_DIM or m.height > _NVENC_MAX_DIM:
+                        log.warning(
+                            "Capture resolution %dx%d exceeds NVENC safe limit (%dpx) — "
+                            "skipping NVENC, using libx264 (expect higher CPU usage)",
+                            m.width, m.height, _NVENC_MAX_DIM,
+                        )
+                        start_codec_idx = next(
+                            (i for i, c in enumerate(_WIN_CODECS) if "nvenc" not in c.name),
+                            0,
+                        )
+            except Exception:
+                pass
+
+            self._launch(start_codec_idx)
 
         def _launch(self, codec_idx: int, use_audio: bool = True, use_loopback: bool = True) -> None:
             codec = _WIN_CODECS[codec_idx]
             cmd = self._build_command(codec, use_audio, use_loopback)
+            backend = "ddagrab" if self._use_ddagrab else "gdigrab"
             log.info(
-                "Starting Windows recorder (codec=%s, audio=%s, loopback=%s)",
-                codec.split()[0], use_audio, use_loopback,
+                "Starting Windows recorder (backend=%s, codec=%s, audio=%s, loopback=%s)",
+                backend, codec.name, use_audio, use_loopback,
             )
             try:
                 proc = subprocess.Popen(
@@ -551,7 +652,6 @@ if sys.platform == "win32":
                 log.error("ffmpeg stderr: %s", tail)
             if elapsed < 5.0:
                 # WASAPI loopback flag not supported — retry without -loopback flag
-                # (some builds support WASAPI render capture without it)
                 if use_audio and use_loopback and "loopback" in stderr_str.lower():
                     log.warning("WASAPI -loopback unsupported, retrying WASAPI without loopback flag")
                     self._launch(0, use_audio=True, use_loopback=False)
@@ -563,14 +663,23 @@ if sys.platform == "win32":
                     log.warning("WASAPI audio failed, retrying without audio")
                     self._launch(0, use_audio=False, use_loopback=False)
                     return
-                # Codec not supported — try next codec
+                # Codec not supported — try next codec in current backend
                 if codec_idx + 1 < len(_WIN_CODECS):
                     log.warning(
                         "Codec %s failed (%.1fs), trying %s",
-                        _WIN_CODECS[codec_idx].split()[0], elapsed,
-                        _WIN_CODECS[codec_idx + 1].split()[0],
+                        _WIN_CODECS[codec_idx].name, elapsed,
+                        _WIN_CODECS[codec_idx + 1].name,
                     )
                     self._launch(codec_idx + 1, use_audio, use_loopback)
+                    return
+                # All codecs exhausted on ddagrab — fall back to gdigrab
+                if self._use_ddagrab:
+                    log.warning(
+                        "All ddagrab codec paths failed — DXGI unavailable on this system. "
+                        "Falling back to gdigrab (GDI capture, higher CPU overhead)"
+                    )
+                    self._use_ddagrab = False
+                    self._launch(0, use_audio, use_loopback)
                     return
             self._running = False
             log.error("ffmpeg recorder exited after %.1fs", elapsed)
@@ -645,7 +754,7 @@ if sys.platform == "win32":
             return self._running and self._proc is not None and self._proc.poll() is None
 
         def build_command(self, target: str | None = None) -> list[str]:
-            return self._build_command(_WIN_CODECS[self._codec_idx])
+            return self._build_command(_WIN_CODECS[self._codec_idx % len(_WIN_CODECS)])
 
         @property
         def pid(self) -> int | None:
