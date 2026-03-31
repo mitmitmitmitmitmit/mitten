@@ -137,9 +137,13 @@ def _do_process(
     target_mb = config.recorder.compression_target_mb
     light_mode = _is_light_mode(config)
 
+    # Skip compression if clip is already under the target size
+    raw_size_mb = raw_path.stat().st_size / (1024 * 1024)
+    should_compress = auto_compress and raw_size_mb > target_mb
+
     # ── No user watermark — still burn mitten mark ───────────────────
     if not wm.enabled:
-        if auto_compress and actual_seconds > 0:
+        if should_compress and actual_seconds > 0:
             log.info("Encoding clip (mitten mark only, targeted): %s (%ds)", filename, actual_seconds)
             success = _encode_targeted(raw_path, output_path, None, target_mb, actual_seconds, light_mode=light_mode)
             if not success:
@@ -187,8 +191,8 @@ def _do_process(
 
         if success:
             log.info("Clip saved (no user watermark): %s", filename)
-            _record_metric(start_time, output_path, auto_compress and actual_seconds > 0, raw_path if raw_path.exists() else None)
-            _write_meta(output_path, meta, actual_seconds, config, watermarked=False, compressed=auto_compress and actual_seconds > 0)
+            _record_metric(start_time, output_path, should_compress and actual_seconds > 0, raw_path if raw_path.exists() else None)
+            _write_meta(output_path, meta, actual_seconds, config, watermarked=False, compressed=should_compress and actual_seconds > 0)
             if on_success:
                 on_success(output_path, actual_seconds)
         else:
@@ -198,7 +202,7 @@ def _do_process(
         return
 
     # ── Watermark path ────────────────────────────────────────────────
-    if auto_compress and actual_seconds > 0:
+    if should_compress and actual_seconds > 0:
         # Single pass: watermark + bitrate-targeted encode — no generation loss
         log.info("Encoding clip (watermark + compress): %s (%ds, target %dMB)",
                  filename, actual_seconds, target_mb)
