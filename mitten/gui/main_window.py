@@ -1258,6 +1258,15 @@ class _AboutPage(QWidget):
         layout.addWidget(_gap(10))
 
         _changelog_entries = [
+            ("0.3.6.8", "317d8ee", "retry compression encode if output exceeds target size", True),
+            ("0.3.6.6", "1618aeb", "reduce discord presence reconnect delay 15s→5s", True),
+            ("0.3.6.5", "52b8c36", "MAUVE color, MittenConfig defaults, QMessageBox button styles", True),
+            ("0.3.6.3", "3801c64", "retry clip preview load if QMediaPlayer silently failed", True),
+            ("0.3.6.2", "c63eceb", "only restart gsr on recorder-relevant config changes, fix afftdn noise filter", True),
+            ("0.3.6.1", "f6bad0f", "fix mic combo dropdown, fix duck amount orphaned label", True),
+            ("0.3.6",   "4757ab2", "mic capture — device picker, volume, noise reduction, ducking", False),
+            ("0.3.5",   "8d814a2", "remove clip editor, fix Open External clipping", False),
+            ("0.3.4.3", "b1830c4", "update changelog with all 0.3.x entries", True),
             ("0.3.4.2", "c5d6608", "README cleanup — remove animated watermarks, fix coming section", True),
             ("0.3.4.1", "fbf09dd", "fix session recording save (SaveWorker → process_clip)", True),
             ("0.3.4",   "149abd3", "remove intro animation, hardcode mitten version watermark", False),
