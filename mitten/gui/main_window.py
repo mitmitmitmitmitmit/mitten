@@ -281,7 +281,7 @@ class _StatusBanner(QFrame):
             f"font-size: 11px; color: {C.SUBTEXT}; background: transparent; border: none;"
         )
 
-        dead = state == "no_deps" or state == "recorder_dead"
+        dead = state == "no_deps"
         self._btn_toggle.setEnabled(not dead)
 
         running = state in ("recording", "game", "saving")

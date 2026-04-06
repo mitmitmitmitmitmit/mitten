@@ -549,6 +549,11 @@ if sys.platform == "win32":
                 else:
                     cmd += ["-an"]
 
+            # Force keyframes at exact segment boundaries so segments are exactly
+            # _WIN_SEG_SECS long — without this, ffmpeg cuts at the nearest keyframe
+            # which makes segments longer and causes buffer overshoot (e.g. 15s → 25s).
+            cmd += ["-force_key_frames", f"expr:gte(t,n_forced*{_WIN_SEG_SECS})"]
+
             cmd += [
                 "-f", "segment",
                 "-segment_time", str(_WIN_SEG_SECS),

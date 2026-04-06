@@ -828,11 +828,19 @@ class ClipBrowser(QWidget):
         menu.exec(self._table.viewport().mapToGlobal(pos))
 
     def _delete_clip(self, clip: Path) -> None:
-        reply = QMessageBox.question(
-            self, "Delete clip?",
-            f"Delete {clip.name}?\nThis cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        from .resources import C, _accent_hover
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Delete clip?")
+        msg.setText(f"Delete {clip.name}?\nThis cannot be undone.")
+        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg.setDefaultButton(QMessageBox.StandardButton.No)
+        msg.setStyleSheet(
+            f"QMessageBox {{ background-color: {C.BG}; color: {C.TEXT}; }}"
+            f"QMessageBox QPushButton {{ background-color: {C.LAVENDER}; color: {C.BG};"
+            f" border: none; border-radius: 6px; padding: 6px 16px; font-weight: bold; }}"
+            f"QMessageBox QPushButton:hover {{ background-color: {_accent_hover()}; }}"
         )
+        reply = msg.exec()
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 clip.unlink()
