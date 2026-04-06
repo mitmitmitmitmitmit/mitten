@@ -352,6 +352,19 @@ def _encode_targeted(
     if not success:
         log.info("NVENC VBR failed, falling back to libx264 two-pass")
         success = _run_x264_twopass(input_path, output_path, video_kbps, vf)
+
+    # If output is still over target, re-encode once with a proportionally lower bitrate
+    if success and output_path.exists():
+        actual_mb = output_path.stat().st_size / (1024 * 1024)
+        if actual_mb > target_mb + 0.1:
+            scale = (target_mb / actual_mb) * 0.90
+            video_kbps = max(200, int(video_kbps * scale))
+            log.info("Output %.1fMB over target %dMB — retrying at %dkbps", actual_mb, target_mb, video_kbps)
+            output_path.unlink(missing_ok=True)
+            success = _run_nvenc_vbr(input_path, output_path, video_kbps, vf)
+            if not success:
+                success = _run_x264_twopass(input_path, output_path, video_kbps, vf)
+
     return success
 
 
